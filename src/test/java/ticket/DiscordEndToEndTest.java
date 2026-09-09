@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.AfterAll;
@@ -195,6 +196,38 @@ class DiscordEndToEndTest {
 		final Ticket zu = TicketDao.byChannel(kanalId).orElseThrow();
 		assertFalse(zu.isOpen());
 		assertEquals("e2e-closed-0041", zu.channelName());
+
+		// Die Schliessnachricht bleibt im Kanal stehen und traegt die Knoepfe.
+		TicketInteractions.postCloseNotice(kanal, zu, guild.getSelfMember().getId());
+
+		net.dv8tion.jda.api.entities.Message notiz = null;
+		for (int versuch = 0; versuch < 20 && notiz == null; versuch++) {
+			notiz = kanal.getHistory().retrievePast(5).complete().stream()
+					.filter(m -> m.getEmbeds().stream()
+							.anyMatch(e -> "Ticket geschlossen".equals(e.getTitle())))
+					.findFirst().orElse(null);
+			if (notiz == null) {
+				try {
+					Thread.sleep(500);
+				} catch (final InterruptedException e) {
+					Thread.currentThread().interrupt();
+				}
+			}
+		}
+		assertNotNull(notiz, "Im geschlossenen Ticket steht keine Schliessnachricht");
+
+		// Entscheidend: eine gewoehnliche Kanalnachricht, keine fluechtige
+		// Antwort — sie muss fuer alle im Ticket sichtbar bleiben.
+		assertFalse(notiz.isEphemeral(), "Die Schliessnachricht darf nicht nur der Klickende sehen");
+
+		final List<String> knoepfe = notiz.getButtons().stream()
+				.map(net.dv8tion.jda.api.interactions.components.buttons.Button::getId)
+				.toList();
+		assertEquals(3, knoepfe.size(), "Erwartet: Transcript, Wieder öffnen, Löschen");
+		assertTrue(knoepfe.contains(TicketInteractions.TRANSCRIPT_PREFIX + zu.id()));
+		assertTrue(knoepfe.contains(TicketInteractions.REOPEN_PREFIX + zu.id()));
+		assertTrue(knoepfe.contains(TicketInteractions.DELETE_PREFIX + zu.id()),
+				"Der Löschknopf fehlt — genau der soll den Befehl ersetzen");
 	}
 
 	@Test

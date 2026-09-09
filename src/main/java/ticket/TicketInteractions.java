@@ -25,6 +25,7 @@ import net.dv8tion.jda.api.interactions.components.buttons.Button;
 import net.dv8tion.jda.api.utils.messages.MessageCreateBuilder;
 import panel.MenuRenderer;
 import transcript.TranscriptArchiver;
+import transcript.TranscriptAusgabe;
 import util.Dm;
 import util.MessageUtil;
 
@@ -42,6 +43,9 @@ public class TicketInteractions extends ListenerAdapter {
 	public static final String CLOSE_CONFIRM_PREFIX = "tb:close-confirm:";
 	public static final String CLOSE_ABORT = "tb:close-abort";
 	public static final String DELETE_CONFIRM_PREFIX = "tb:delete-confirm:";
+	public static final String DELETE_PREFIX = "tb:delete:";
+	public static final String REOPEN_PREFIX = "tb:reopen:";
+	public static final String TRANSCRIPT_PREFIX = "tb:transcript:";
 
 	@Override
 	public void onButtonInteraction(@Nonnull ButtonInteractionEvent event) {
@@ -51,6 +55,12 @@ public class TicketInteractions extends ListenerAdapter {
 			handleOpen(event, parseId(id, MenuRenderer.OPEN_PREFIX));
 		} else if (id.startsWith(DELETE_CONFIRM_PREFIX)) {
 			handleDeleteConfirmed(event, parseId(id, DELETE_CONFIRM_PREFIX));
+		} else if (id.startsWith(DELETE_PREFIX)) {
+			askDeleteConfirmation(event, parseId(id, DELETE_PREFIX));
+		} else if (id.startsWith(REOPEN_PREFIX)) {
+			handleReopen(event, parseId(id, REOPEN_PREFIX));
+		} else if (id.startsWith(TRANSCRIPT_PREFIX)) {
+			handleTranscript(event, parseId(id, TRANSCRIPT_PREFIX));
 		} else if (id.startsWith(CLOSE_CONFIRM_PREFIX)) {
 			handleCloseConfirmed(event, parseId(id, CLOSE_CONFIRM_PREFIX));
 		} else if (id.startsWith(CLOSE_PREFIX)) {
@@ -164,7 +174,13 @@ public class TicketInteractions extends ListenerAdapter {
 				? panel.welcomeEmbedTitle()
 				: panel.name();
 
+		// Der einzige Ort, an dem ein Ping gewollt ist: der Eroeffner und die
+		// zustaendigen Rollen sollen mitbekommen, dass es losgeht. Ueberall
+		// sonst gilt die stille Voreinstellung aus Bot.main.
 		channel.sendMessage(new MessageCreateBuilder()
+				.setAllowedMentions(java.util.EnumSet.of(
+						net.dv8tion.jda.api.entities.Message.MentionType.USER,
+						net.dv8tion.jda.api.entities.Message.MentionType.ROLE))
 				.setContent(content.toString())
 				.setEmbeds(MessageUtil.embed(title,
 						MessageUtil.fill(panel.welcomeEmbedText(), owner.getAsMention(), panel.name()),
@@ -238,8 +254,13 @@ public class TicketInteractions extends ListenerAdapter {
 				TicketService.close(guild, ticket, panel.get(), closer.getId(), null);
 				// Nach dem Schliessen neu laden: der Kanalname hat sich geaendert,
 				// und genau der soll im Archiv und im Log stehen.
-				TicketDao.byId(ticketId).ifPresent(
-						closed -> TranscriptArchiver.archive(guild, closed, panel.get(), closer.getId()));
+				TicketDao.byId(ticketId).ifPresent(closed -> {
+					TranscriptArchiver.archive(guild, closed, panel.get(), closer.getId());
+					final TextChannel kanal = guild.getTextChannelById(closed.channelId());
+					if (kanal != null) {
+						postCloseNotice(kanal, closed, closer.getId());
+					}
+				});
 				event.getHook().editOriginal("Ticket geschlossen.").setComponents(List.of()).queue();
 			} catch (final RuntimeException e) {
 				System.err.println("Ticket " + ticketId + " konnte nicht geschlossen werden: " + e);
@@ -249,9 +270,158 @@ public class TicketInteractions extends ListenerAdapter {
 		}, "ticket-close-" + ticketId).start());
 	}
 
+	/**
+	 * Die Nachricht, die im geschlossenen Ticket stehen bleibt.
+	 *
+	 * Bewusst eine gewoehnliche Kanalnachricht und keine fluechtige Antwort:
+	 * sie gilt allen im Ticket und steht morgen noch da. Daran haengen die
+	 * Knoepfe — Transcript holen, wieder oeffnen, loeschen. Ticket Tool macht
+	 * es genauso, und niemand soll sich dafuer einen Befehl merken muessen.
+	 *
+	 * Der Loeschknopf ist fuer alle sichtbar, wirkt aber nur beim Team. Ihn zu
+	 * verstecken hiesse, ihn an die Rolle des Betrachters zu binden — dieselbe
+	 * Nachricht kann Discord aber nicht zwei Leuten verschieden zeigen.
+	 */
+	public static void postCloseNotice(TextChannel channel, Ticket ticket, String closerId) {
+		final GuildConfig config = GuildConfigDao.get(ticket.guildId());
+		final String von = closerId == null
+				? "Automatisch geschlossen"
+				: "Geschlossen von <@" + closerId + ">";
+
+		channel.sendMessageEmbeds(MessageUtil.embed("Ticket geschlossen",
+				von + ".\n\nDer Verlauf ist gesichert. **Löschen** entfernt den Kanal endgültig — "
+						+ "das Transcript bleibt auch danach abrufbar.",
+				config.ticketEmbedColor()))
+				.setComponents(ActionRow.of(
+						Button.secondary(TRANSCRIPT_PREFIX + ticket.id(), "Transcript")
+								.withEmoji(Emoji.fromUnicode("\uD83D\uDCC4")),
+						Button.success(REOPEN_PREFIX + ticket.id(), "Wieder öffnen")
+								.withEmoji(Emoji.fromUnicode("\uD83D\uDD13")),
+						Button.danger(DELETE_PREFIX + ticket.id(), "Löschen")
+								.withEmoji(Emoji.fromUnicode("\uD83D\uDDD1"))))
+				.queue(ok -> {
+				}, err -> System.err.println("Schliessnachricht in " + ticket.channelName()
+						+ " fehlgeschlagen: " + err.getMessage()));
+	}
+
+	// -----------------------------------------------------------------------
+	// Transcript und Wiedereroeffnen ueber die Knoepfe
+	// -----------------------------------------------------------------------
+
+	private void handleTranscript(ButtonInteractionEvent event, long ticketId) {
+		final Guild guild = event.getGuild();
+		if (guild == null) {
+			return;
+		}
+		// Nur fuer den Klickenden: die Datei enthaelt den ganzen Verlauf.
+		event.deferReply(true).queue(hook -> new Thread(() -> {
+			final Optional<Ticket> ticket = TicketDao.byId(ticketId);
+			if (ticket.isEmpty()) {
+				hook.editOriginalEmbeds(MessageUtil.error("Dieses Ticket gibt es nicht mehr.")).queue();
+				return;
+			}
+			try {
+				TranscriptAusgabe.senden(hook, guild, ticket.get(), event.getUser().getId());
+			} catch (final RuntimeException e) {
+				System.err.println("Transcript fuer " + ticketId + " fehlgeschlagen: " + e);
+				hook.editOriginalEmbeds(MessageUtil.error(
+						"Das Transcript konnte nicht erzeugt werden.")).queue();
+			}
+		}, "transcript-" + ticketId).start());
+	}
+
+	private void handleReopen(ButtonInteractionEvent event, long ticketId) {
+		final Guild guild = event.getGuild();
+		final Member member = event.getMember();
+		if (guild == null || member == null) {
+			return;
+		}
+
+		event.deferReply(true).queue(hook -> new Thread(() -> {
+			final Optional<Ticket> maybeTicket = TicketDao.byId(ticketId);
+			if (maybeTicket.isEmpty()) {
+				hook.editOriginalEmbeds(MessageUtil.error("Dieses Ticket gibt es nicht mehr.")).queue();
+				return;
+			}
+			final Ticket ticket = maybeTicket.get();
+
+			if (!Visibility.darfVerwalten(guild, ticket, member)) {
+				hook.editOriginalEmbeds(MessageUtil.error(
+						"Tickets wieder öffnen darf nur das Team dieses Bereichs.")).queue();
+				return;
+			}
+			if (ticket.isOpen()) {
+				hook.editOriginalEmbeds(MessageUtil.error("Dieses Ticket ist bereits offen.")).queue();
+				return;
+			}
+			final Optional<Panel> panel = ticket.panelId() == null
+					? Optional.empty()
+					: PanelDao.byId(ticket.panelId());
+			if (panel.isEmpty()) {
+				hook.editOriginalEmbeds(MessageUtil.error(
+						"Das zugehörige Panel gibt es nicht mehr.")).queue();
+				return;
+			}
+
+			try {
+				TicketService.reopen(guild, ticket, panel.get());
+				// Die Knoepfe an dieser Nachricht passen jetzt nicht mehr: das
+				// Ticket ist offen, und ein Loeschknopf mitten im laufenden
+				// Gespraech ist eine Falle.
+				event.getMessage().editMessageComponents(List.of()).queue(ok -> {
+				}, err -> {
+				});
+				hook.editOriginalEmbeds(MessageUtil.embed(null,
+						"Ticket wieder geöffnet.", 0x1ec45c)).queue();
+			} catch (final RuntimeException e) {
+				System.err.println("Wiedereroeffnen von " + ticketId + " fehlgeschlagen: " + e);
+				hook.editOriginalEmbeds(MessageUtil.error(
+						"Wiedereröffnen fehlgeschlagen: " + e.getMessage())).queue();
+			}
+		}, "ticket-reopen-" + ticketId).start());
+	}
+
 	// -----------------------------------------------------------------------
 	// Loeschen
 	// -----------------------------------------------------------------------
+
+	/**
+	 * Fragt nach, bevor geloescht wird — dieselbe Rueckfrage wie bei
+	 * {@code /ticket loeschen}, nur ueber den Knopf ausgeloest.
+	 *
+	 * Die Rueckfrage sieht nur der Klickende; die Schliessnachricht bleibt fuer
+	 * alle stehen.
+	 */
+	private void askDeleteConfirmation(ButtonInteractionEvent event, long ticketId) {
+		final Guild guild = event.getGuild();
+		final Member member = event.getMember();
+		if (guild == null || member == null) {
+			return;
+		}
+		final Optional<Ticket> ticket = TicketDao.byId(ticketId);
+		if (ticket.isEmpty()) {
+			event.replyEmbeds(MessageUtil.error("Dieses Ticket gibt es nicht mehr."))
+					.setEphemeral(true).queue();
+			return;
+		}
+		if (!Visibility.darfVerwalten(guild, ticket.get(), member)) {
+			event.replyEmbeds(MessageUtil.error(
+					"Tickets löschen darf nur das Team dieses Bereichs."))
+					.setEphemeral(true).queue();
+			return;
+		}
+
+		event.replyEmbeds(MessageUtil.error(
+				"**" + ticket.get().channelName() + "** wirklich löschen?\n\n"
+						+ "Der Verlauf wird vorher gesichert und bleibt über "
+						+ "`/transcript holen id:" + ticketId + "` abrufbar.\n\n"
+						+ "Der Kanal selbst ist danach weg — das lässt sich nicht rückgängig machen."))
+				.setEphemeral(true)
+				.setComponents(ActionRow.of(
+						Button.danger(DELETE_CONFIRM_PREFIX + ticketId, "Ja, löschen"),
+						Button.secondary(CLOSE_ABORT, "Abbrechen")))
+				.queue();
+	}
 
 	/**
 	 * Fuehrt das Loeschen aus, nachdem im Befehl nachgefragt wurde.

@@ -95,6 +95,24 @@ Menü gehängt und mit `/menu posten` sichtbar gemacht. Menüs werden bei jedem 
 Konfiguration abgeglichen — eine Änderung wirkt also spätestens nach einem Neustart von
 selbst, und ein versehentlich gelöschtes Menü kommt zurück.
 
+## Was im geschlossenen Ticket stehen bleibt
+
+Beim Schließen postet der Bot eine Nachricht in den Kanal — **für alle im Ticket
+sichtbar, keine flüchtige Antwort** — mit drei Knöpfen: **Transcript**, **Wieder
+öffnen**, **Löschen**. Damit braucht der Alltag keinen einzigen Befehl; die Befehle
+bleiben als zweiter Weg bestehen.
+
+Der Löschknopf ist für alle sichtbar, wirkt aber nur beim Team. Ihn zu verstecken
+hieße, ihn an die Rolle des Betrachters zu binden — dieselbe Nachricht kann Discord
+aber nicht zwei Leuten verschieden zeigen. Wer nicht darf, bekommt eine Absage, die
+nur er sieht.
+
+**Der Bot pingt grundsätzlich niemanden.** Erwähnungen bleiben sichtbar und
+anklickbar, lösen aber keine Benachrichtigung aus. Anlass war der Storage-Kanal: dort
+steht in jedem Archiv-Post die Owner-ID im Klartext, damit der Kanal ohne Datenbank
+durchsuchbar bleibt — und benachrichtigte damit bei jedem geschlossenen Ticket den
+Eröffner. Die einzige Ausnahme steht ausdrücklich im Code: die Willkommensnachricht.
+
 `/ticket loeschen` ist der einzige Ticketbefehl, den nicht jeder im Kanal ausführen
 darf: nur das Team des jeweiligen Bereichs (Support-Rolle des Panels oder
 `Server verwalten`), ausdrücklich **nicht** der Eröffner. Sonst könnte ein abgelehnter

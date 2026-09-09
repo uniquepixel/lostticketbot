@@ -1,14 +1,12 @@
 package commands;
 
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 
 import javax.annotation.Nonnull;
 
-import db.Database;
-import db.PanelDao;
 import db.TicketDao;
+import db.Database;
 import model.Panel;
 import model.Ticket;
 import net.dv8tion.jda.api.entities.Guild;
@@ -16,9 +14,8 @@ import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEve
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.interactions.InteractionHook;
 import net.dv8tion.jda.api.interactions.commands.OptionMapping;
-import net.dv8tion.jda.api.utils.FileUpload;
 import ticket.Visibility;
-import transcript.HtmlRenderer;
+import transcript.TranscriptAusgabe;
 import util.MessageUtil;
 
 /**
@@ -128,30 +125,6 @@ public class TranscriptCommand extends ListenerAdapter {
 	}
 
 	private void ausgeben(InteractionHook hook, Guild guild, Ticket ticket, String anfragenderId) {
-		if (!Visibility.darfSehen(guild, ticket, anfragenderId)) {
-			hook.editOriginalEmbeds(MessageUtil.error("Kein Ticket mit dieser ID gefunden.")).queue();
-			return;
-		}
-
-		final Panel panel = ticket.panelId() == null
-				? null
-				: PanelDao.byId(ticket.panelId()).orElse(null);
-
-		final byte[] html = HtmlRenderer.rendern(ticket, panel).getBytes(StandardCharsets.UTF_8);
-		final int nachrichten = Database.count(
-				"SELECT COUNT(*) FROM ticket_messages WHERE ticket_id = ?", ticket.id());
-		final int anhaenge = Database.count(
-				"SELECT COUNT(*) FROM ticket_attachments WHERE ticket_id = ?", ticket.id());
-
-		hook.editOriginalEmbeds(MessageUtil.embed("Transcript " + ticket.channelName(),
-				nachrichten + " Nachrichten, " + anhaenge + " Anhänge · "
-						+ (html.length / 1024) + " KB\n\n"
-						+ "Herunterladen und im Browser öffnen. Die Bilder sind verlinkt, nicht "
-						+ "eingebettet — deshalb ist die Datei klein, und deshalb zeigt sie die "
-						+ "Bilder nach etwa einem Tag nicht mehr an. Die Bilder selbst bleiben "
-						+ "gespeichert; ein neues `/transcript` erzeugt frische Links.",
-				0x1ec45c))
-				.setFiles(FileUpload.fromData(html, "transcript-" + ticket.channelName() + ".html"))
-				.queue();
+		TranscriptAusgabe.senden(hook, guild, ticket, anfragenderId);
 	}
 }

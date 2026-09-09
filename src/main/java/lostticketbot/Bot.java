@@ -32,6 +32,7 @@ import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 import net.dv8tion.jda.api.utils.ChunkingFilter;
 import net.dv8tion.jda.api.utils.MemberCachePolicy;
+import net.dv8tion.jda.api.utils.messages.MessageRequest;
 import panel.MenuRenderer;
 import ticket.TicketInteractions;
 import ticket.TicketService;
@@ -79,6 +80,19 @@ public class Bot extends ListenerAdapter {
 			}
 		}
 
+		// Standardmaessig pingt nichts, was der Bot schreibt.
+		//
+		// Anlass ist der Storage-Kanal: dort steht in jedem Archiv-Post die
+		// Owner-ID im Klartext, damit der Kanal ohne Datenbank durchsuchbar
+		// bleibt — und benachrichtigte damit bei jedem geschlossenen Ticket den
+		// Eroeffner. Erwaehnungen bleiben sichtbar und anklickbar, sie loesen nur
+		// keine Benachrichtigung mehr aus.
+		//
+		// Wo ein Ping gewollt ist, steht er ausdruecklich da: siehe
+		// TicketInteractions.postWelcome. Damit ist Anpingen die Ausnahme, die man
+		// begruenden muss, statt der Nebenwirkung, die man uebersieht.
+		erwaehnungenStandardmaessigStumm();
+
 		jda = JDABuilder.createDefault(token)
 				// GUILD_MEMBERS: noetig, um mitzubekommen, wenn ein Bewerber den
 				// Server verlaesst (Ticket Tool nennt das "Missing user check").
@@ -99,6 +113,11 @@ public class Bot extends ListenerAdapter {
 			}
 			Database.shutdown();
 		}, "shutdown"));
+	}
+
+	/** Siehe den Kommentar am Aufruf. Eigene Methode, damit ein Test sie festhalten kann. */
+	static void erwaehnungenStandardmaessigStumm() {
+		MessageRequest.setDefaultMentions(java.util.Collections.emptyList());
 	}
 
 	private static String required(String name) {
@@ -177,8 +196,16 @@ public class Bot extends ListenerAdapter {
 						}
 					}
 					TicketService.close(guild, ticket, panel, null, "Eroeffner hat den Server verlassen");
-					TicketDao.byId(ticket.id()).ifPresent(
-							closed -> TranscriptArchiver.archive(guild, closed, panel, null));
+					TicketDao.byId(ticket.id()).ifPresent(closed -> {
+						TranscriptArchiver.archive(guild, closed, panel, null);
+						// Auch hier die Schliessnachricht: gerade bei einem
+						// weggegangenen Bewerber will das Team danach oft
+						// aufraeumen, und der Loeschknopf ist dann zur Hand.
+						final TextChannel kanal = guild.getTextChannelById(closed.channelId());
+						if (kanal != null) {
+							TicketInteractions.postCloseNotice(kanal, closed, null);
+						}
+					});
 					System.out.println("Ticket " + ticket.channelName() + " geschlossen: Eroeffner ist weg.");
 				} catch (final RuntimeException e) {
 					System.err.println("Automatisches Schliessen von " + ticket.channelName()
