@@ -249,6 +249,25 @@ CREATE TABLE IF NOT EXISTS blacklist (
 );
 
 -- ---------------------------------------------------------------------------
+-- Ausnahmen bei der Uebernahme
+-- ---------------------------------------------------------------------------
+
+-- Kanaele, die bei /uebernehmen nie als Ticket gelten sollen.
+--
+-- Noetig, weil die Erkennung an der ersten Nachricht haengt: ein Kanal, der
+-- einmal ein Ticket war und inzwischen etwas anderes ist, sieht fuer den Bot
+-- weiterhin wie eines aus. Wuerde er uebernommen, schriebe der Recorder ab
+-- sofort jedes Gespraech darin ins Transcript.
+CREATE TABLE IF NOT EXISTS adoption_exclusions (
+    guild_id   TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    reason     TEXT,
+    added_by   TEXT,
+    added_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id, channel_id)
+);
+
+-- ---------------------------------------------------------------------------
 -- Indizes
 -- ---------------------------------------------------------------------------
 

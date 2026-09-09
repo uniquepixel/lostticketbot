@@ -113,9 +113,17 @@ public final class AdoptionService {
 		return gefunden;
 	}
 
-	/** Die Log-Kanaele aller Panels und der Storage-Kanal — nie Tickets. */
+	/**
+	 * Kanaele, die nie als Ticket gelten: Log-Kanaele, der Storage-Kanal und
+	 * alles, was von Hand ausgeschlossen wurde.
+	 */
 	private static Set<String> ausgenommeneKanaele(List<Panel> panels) {
 		final Set<String> aus = new HashSet<>();
+		if (!panels.isEmpty()) {
+			aus.addAll(Database.query(
+					"SELECT channel_id FROM adoption_exclusions WHERE guild_id = ?",
+					rs -> rs.getString(1), panels.get(0).guildId()));
+		}
 		for (final Panel p : panels) {
 			if (p.logChannelId() != null && !p.logChannelId().isBlank()) {
 				aus.add(p.logChannelId());

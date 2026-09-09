@@ -41,6 +41,24 @@ public final class MenuRenderer {
 	private MenuRenderer() {
 	}
 
+	/**
+	 * Gleicht ein bereits gepostetes Menue mit der Konfiguration ab — und postet
+	 * NICHTS, was noch nie gepostet wurde.
+	 *
+	 * Die Unterscheidung ist wichtig genug fuer eine eigene Methode: beim Start
+	 * laeuft der Abgleich ueber alle Menues, und ein frisch angelegtes, noch
+	 * nicht veroeffentlichtes Menue darf dabei nicht ploetzlich auf dem Server
+	 * erscheinen. Genau das ist am 09.09.2026 auf beiden Produktivservern
+	 * passiert, waehrend Ticket Tool noch lief.
+	 */
+	public static void nurAktualisieren(TextChannel channel, Menu menu) {
+		if (!menu.isPosted()) {
+			return;
+		}
+		postOrUpdate(channel, menu);
+	}
+
+	/** Postet das Menue oder aktualisiert die vorhandene Nachricht. */
 	public static void postOrUpdate(TextChannel channel, Menu menu) {
 		final GuildConfig config = GuildConfigDao.get(menu.guildId());
 		final int color = menu.embedColor() != null ? menu.embedColor() : config.panelEmbedColor();

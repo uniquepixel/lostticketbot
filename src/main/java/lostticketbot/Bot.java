@@ -126,12 +126,14 @@ public class Bot extends ListenerAdapter {
 	}
 
 	/**
-	 * Bringt jede Menuenachricht auf den Stand der Konfiguration.
+	 * Bringt jede BEREITS GEPOSTETE Menuenachricht auf den Stand der
+	 * Konfiguration.
 	 *
 	 * Damit wirkt eine Aenderung an Panels oder Beschriftungen nach einem
-	 * Neustart von selbst, und ein versehentlich geloeschtes Menue kommt
-	 * zurueck. Bestehende Nachrichten werden bearbeitet, nicht neu gepostet -
-	 * sonst haette der Kanal nach jedem Neustart ein Duplikat mehr.
+	 * Neustart von selbst. Menues, die es noch nie in einen Kanal geschafft
+	 * haben, bleiben unangetastet - veroeffentlicht wird ausschliesslich per
+	 * /menu posten. Ohne diese Trennung postet ein Neustart jede vorbereitete
+	 * Konfiguration sofort auf den Server.
 	 */
 	private void refreshMenus(JDA jda) {
 		for (final Guild guild : jda.getGuilds()) {
@@ -141,7 +143,7 @@ public class Bot extends ListenerAdapter {
 					System.err.println("Menue " + menu.id() + ": Kanal " + menu.channelId() + " gibt es nicht mehr.");
 					continue;
 				}
-				MenuRenderer.postOrUpdate(channel, menu);
+				MenuRenderer.nurAktualisieren(channel, menu);
 			}
 		}
 	}
