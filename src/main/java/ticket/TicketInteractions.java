@@ -134,7 +134,13 @@ public class TicketInteractions extends ListenerAdapter {
 		final GuildConfig config = GuildConfigDao.get(panel.guildId());
 
 		final List<String> mentions = new ArrayList<>();
-		mentions.add(owner.getAsMention());
+		// Den Eroeffner nur dann separat anpingen, wenn der Willkommenstext ihn
+		// nicht ohnehin schon erwaehnt. Sonst steht er zweimal in derselben
+		// Nachricht — "@Simon\nHey @Simon, danke fuer deine Bewerbung" — und
+		// bekommt zwei Benachrichtigungen fuer ein Ticket.
+		if (!erwaehntEroeffner(panel.welcomeText())) {
+			mentions.add(owner.getAsMention());
+		}
 		for (final String roleId : PanelDao.pingRoles(panel.id())) {
 			final var role = channel.getGuild().getRoleById(roleId);
 			if (role != null) {
@@ -145,7 +151,10 @@ public class TicketInteractions extends ListenerAdapter {
 		final String body = MessageUtil.fill(panel.welcomeText(), owner.getAsMention(), panel.name());
 		final StringBuilder content = new StringBuilder(String.join(" ", mentions));
 		if (!body.isBlank()) {
-			content.append('\n').append(body);
+			if (content.length() > 0) {
+				content.append('\n');
+			}
+			content.append(body);
 		}
 
 		final String title = panel.welcomeEmbedTitle() != null && !panel.welcomeEmbedTitle().isBlank()
@@ -162,9 +171,23 @@ public class TicketInteractions extends ListenerAdapter {
 				.queue();
 	}
 
+	/**
+	 * Erwaehnt der Willkommenstext den Eroeffner selbst?
+	 *
+	 * Sowohl {@code {user}} als Platzhalter als auch eine bereits eingesetzte
+	 * Erwaehnung zaehlen — letzteres kommt vor, wenn ein Text aus einer
+	 * bestehenden Nachricht uebernommen wurde.
+	 */
+	static boolean erwaehntEroeffner(String willkommenstext) {
+		if (willkommenstext == null || willkommenstext.isBlank()) {
+			return false;
+		}
+		return willkommenstext.contains("{user}") || willkommenstext.matches("(?s).*<@!?\\d+>.*");
+	}
+
 	private Button closeButton(TextChannel channel) {
 		final long ticketId = TicketDao.byChannel(channel.getId()).map(Ticket::id).orElse(0L);
-		return Button.secondary(CLOSE_PREFIX + ticketId, "Schliessen").withEmoji(Emoji.fromUnicode("🔒"));
+		return Button.secondary(CLOSE_PREFIX + ticketId, "Schließen").withEmoji(Emoji.fromUnicode("🔒"));
 	}
 
 	// -----------------------------------------------------------------------
@@ -179,7 +202,7 @@ public class TicketInteractions extends ListenerAdapter {
 		event.reply("Soll dieses Ticket wirklich geschlossen werden?")
 				.setEphemeral(true)
 				.setComponents(ActionRow.of(
-						Button.danger(CLOSE_CONFIRM_PREFIX + ticketId, "Ja, schliessen"),
+						Button.danger(CLOSE_CONFIRM_PREFIX + ticketId, "Ja, schließen"),
 						Button.secondary(CLOSE_ABORT, "Abbrechen")))
 				.queue();
 	}
