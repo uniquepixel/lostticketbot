@@ -6,8 +6,14 @@ import javax.annotation.Nonnull;
 
 import db.Database;
 import db.GuildConfigDao;
+import commands.CommandRegistry;
+import commands.LegacyCommand;
+import commands.MenuCommand;
+import commands.PanelCommand;
+import db.MenuDao;
 import db.PanelDao;
 import db.TicketDao;
+import model.Menu;
 import model.Panel;
 import model.Ticket;
 import net.dv8tion.jda.api.JDA;
@@ -21,8 +27,10 @@ import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 import net.dv8tion.jda.api.utils.ChunkingFilter;
 import net.dv8tion.jda.api.utils.MemberCachePolicy;
+import panel.MenuRenderer;
 import ticket.TicketInteractions;
 import ticket.TicketService;
+import transcript.TranscriptArchiver;
 import transcript.TranscriptRecorder;
 
 /**
@@ -62,7 +70,8 @@ public class Bot extends ListenerAdapter {
 				.setMemberCachePolicy(MemberCachePolicy.ALL)
 				.setChunkingFilter(ChunkingFilter.ALL)
 				.setActivity(Activity.listening("eure Anliegen"))
-				.addEventListeners(new Bot(), new TicketInteractions(), new TranscriptRecorder())
+				.addEventListeners(new Bot(), new TicketInteractions(), new TranscriptRecorder(),
+						new PanelCommand(), new MenuCommand(), new LegacyCommand())
 				.build();
 
 		Runtime.getRuntime().addShutdownHook(new Thread(Database::shutdown, "db-shutdown"));
@@ -83,9 +92,33 @@ public class Bot extends ListenerAdapter {
 			GuildConfigDao.ensure(guild.getId());
 			System.out.println("  Server: " + guild.getName() + " (" + guild.getId() + "), "
 					+ TicketDao.allOpen(guild.getId()).size() + " offene Tickets");
+			CommandRegistry.register(guild);
 		}
+		refreshMenus(event.getJDA());
+
 		if (storageChannelId == null || storageChannelId.isBlank()) {
 			System.out.println("  Hinweis: kein Storage-Kanal gesetzt — Transcripts werden noch nicht archiviert.");
+		}
+	}
+
+	/**
+	 * Bringt jede Menuenachricht auf den Stand der Konfiguration.
+	 *
+	 * Damit wirkt eine Aenderung an Panels oder Beschriftungen nach einem
+	 * Neustart von selbst, und ein versehentlich geloeschtes Menue kommt
+	 * zurueck. Bestehende Nachrichten werden bearbeitet, nicht neu gepostet -
+	 * sonst haette der Kanal nach jedem Neustart ein Duplikat mehr.
+	 */
+	private void refreshMenus(JDA jda) {
+		for (final Guild guild : jda.getGuilds()) {
+			for (final Menu menu : MenuDao.byGuild(guild.getId())) {
+				final TextChannel channel = guild.getTextChannelById(menu.channelId());
+				if (channel == null) {
+					System.err.println("Menue " + menu.id() + ": Kanal " + menu.channelId() + " gibt es nicht mehr.");
+					continue;
+				}
+				MenuRenderer.postOrUpdate(channel, menu);
+			}
 		}
 	}
 
@@ -118,6 +151,8 @@ public class Bot extends ListenerAdapter {
 						}
 					}
 					TicketService.close(guild, ticket, panel, null, "Eroeffner hat den Server verlassen");
+					TicketDao.byId(ticket.id()).ifPresent(
+							closed -> TranscriptArchiver.archive(guild, closed, panel, null));
 					System.out.println("Ticket " + ticket.channelName() + " geschlossen: Eroeffner ist weg.");
 				} catch (final RuntimeException e) {
 					System.err.println("Automatisches Schliessen von " + ticket.channelName()

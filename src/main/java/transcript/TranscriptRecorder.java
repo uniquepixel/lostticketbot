@@ -86,8 +86,14 @@ public class TranscriptRecorder extends ListenerAdapter {
 			return;
 		}
 
-		if (!message.getAttachments().isEmpty()) {
-			MIRROR.submit(() -> mirrorAttachments(ticketId, rowId, message.getAttachments()));
+		final int attachmentCount = message.getAttachments().size();
+		if (attachmentCount > 0) {
+			System.out.println("Ticket " + ticketId + ": " + attachmentCount
+					+ " Anhang/Anhaenge werden gespiegelt.");
+			// execute() statt submit(): submit() faengt jede Ausnahme im Future
+			// ab, und wenn niemand den abfragt, verschwindet der Fehler spurlos.
+			// Genau das hat den ersten fehlgeschlagenen Spiegelversuch verborgen.
+			MIRROR.execute(() -> mirrorAttachments(ticketId, rowId, message.getAttachments()));
 		}
 	}
 

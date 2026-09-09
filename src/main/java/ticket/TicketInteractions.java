@@ -24,6 +24,7 @@ import net.dv8tion.jda.api.interactions.components.ActionRow;
 import net.dv8tion.jda.api.interactions.components.buttons.Button;
 import net.dv8tion.jda.api.utils.messages.MessageCreateBuilder;
 import panel.MenuRenderer;
+import transcript.TranscriptArchiver;
 import util.MessageUtil;
 
 /**
@@ -83,9 +84,12 @@ public class TicketInteractions extends ListenerAdapter {
 
 		// Nur der Klickende sieht die Antwort - eine Fehlermeldung wie "du hast
 		// schon ein Ticket" geht niemanden sonst etwas an.
-		event.deferReply(true).queue();
-
-		new Thread(() -> {
+		//
+		// Die Arbeit startet erst im Callback der Quittung. Vorher loszulaufen
+		// ist ein Rennen: queue() bestaetigt asynchron, und wenn der Hook
+		// benutzt wird, bevor die Bestaetigung bei Discord angekommen ist,
+		// antwortet Discord mit 10062 "Unknown interaction".
+		event.deferReply(true).queue(hook -> new Thread(() -> {
 			final Optional<Panel> maybePanel = PanelDao.byId(panelId);
 			if (maybePanel.isEmpty()) {
 				event.getHook().editOriginalEmbeds(
@@ -114,7 +118,7 @@ public class TicketInteractions extends ListenerAdapter {
 			event.getHook().editOriginalEmbeds(MessageUtil.embed(null,
 					"Dein Ticket wurde geoeffnet: " + result.channel().getAsMention(),
 					GuildConfigDao.get(guild.getId()).ticketEmbedColor())).queue();
-		}, "ticket-open-" + member.getId()).start();
+		}, "ticket-open-" + member.getId()).start());
 	}
 
 	/** Die erste Nachricht im frisch angelegten Ticket. */
@@ -178,9 +182,8 @@ public class TicketInteractions extends ListenerAdapter {
 		if (guild == null || closer == null) {
 			return;
 		}
-		event.deferEdit().queue();
-
-		new Thread(() -> {
+		// Siehe handleOpen: erst die Quittung abwarten, dann arbeiten.
+		event.deferEdit().queue(hook -> new Thread(() -> {
 			final Optional<Ticket> maybeTicket = TicketDao.byId(ticketId);
 			if (maybeTicket.isEmpty() || !maybeTicket.get().isOpen()) {
 				event.getHook().editOriginal("Dieses Ticket ist bereits geschlossen.")
@@ -199,13 +202,17 @@ public class TicketInteractions extends ListenerAdapter {
 
 			try {
 				TicketService.close(guild, ticket, panel.get(), closer.getId(), null);
+				// Nach dem Schliessen neu laden: der Kanalname hat sich geaendert,
+				// und genau der soll im Archiv und im Log stehen.
+				TicketDao.byId(ticketId).ifPresent(
+						closed -> TranscriptArchiver.archive(guild, closed, panel.get(), closer.getId()));
 				event.getHook().editOriginal("Ticket geschlossen.").setComponents(List.of()).queue();
 			} catch (final RuntimeException e) {
 				System.err.println("Ticket " + ticketId + " konnte nicht geschlossen werden: " + e);
 				event.getHook().editOriginal("Das Schliessen ist fehlgeschlagen: " + e.getMessage())
 						.setComponents(List.of()).queue();
 			}
-		}, "ticket-close-" + ticketId).start();
+		}, "ticket-close-" + ticketId).start());
 	}
 
 	private static long parseId(String componentId, String prefix) {
