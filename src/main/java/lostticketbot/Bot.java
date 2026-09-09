@@ -6,6 +6,7 @@ import javax.annotation.Nonnull;
 
 import db.Database;
 import db.GuildConfigDao;
+import api.TicketApiServer;
 import commands.AdoptCommand;
 import commands.CommandRegistry;
 import commands.ConfigCommand;
@@ -50,6 +51,7 @@ public class Bot extends ListenerAdapter {
 	private static JDA jda;
 	private static String storageGuildId;
 	private static String storageChannelId;
+	private static TicketApiServer apiServer;
 
 	public static void main(String[] args) {
 		final String token = required("TICKETBOT_TOKEN");
@@ -62,6 +64,19 @@ public class Bot extends ListenerAdapter {
 
 		Database.init(dbUrl, dbUser, dbPassword);
 		Database.applySchema();
+
+		// Dashboard-API. Ohne gesetzten Port bleibt sie aus - der Bot laeuft
+		// vollstaendig ohne sie, sie ist reine Zulieferung fuer die Website.
+		final String apiPort = System.getenv("TICKETBOT_API_PORT");
+		if (apiPort != null && !apiPort.isBlank()) {
+			try {
+				apiServer = new TicketApiServer(Integer.parseInt(apiPort),
+						System.getenv("TICKETBOT_API_TOKEN"));
+				apiServer.start();
+			} catch (final Exception e) {
+				System.err.println("Dashboard-API konnte nicht starten: " + e.getMessage());
+			}
+		}
 
 		jda = JDABuilder.createDefault(token)
 				// GUILD_MEMBERS: noetig, um mitzubekommen, wenn ein Bewerber den
@@ -77,7 +92,12 @@ public class Bot extends ListenerAdapter {
 						new PanelCommand(), new MenuCommand(), new LegacyCommand(), new TicketCommand(), new ConfigCommand(), new AdoptCommand())
 				.build();
 
-		Runtime.getRuntime().addShutdownHook(new Thread(Database::shutdown, "db-shutdown"));
+		Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+			if (apiServer != null) {
+				apiServer.stop();
+			}
+			Database.shutdown();
+		}, "shutdown"));
 	}
 
 	private static String required(String name) {
