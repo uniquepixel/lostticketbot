@@ -1,0 +1,207 @@
+package ticket;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+
+import java.util.EnumSet;
+import java.util.Optional;
+
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Order;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.TestMethodOrder;
+
+import db.Database;
+import db.GuildConfigDao;
+import db.PanelDao;
+import db.TicketDao;
+import model.Panel;
+import model.Ticket;
+import net.dv8tion.jda.api.JDA;
+import net.dv8tion.jda.api.JDABuilder;
+import net.dv8tion.jda.api.Permission;
+import net.dv8tion.jda.api.entities.Guild;
+import net.dv8tion.jda.api.entities.Member;
+import net.dv8tion.jda.api.entities.PermissionOverride;
+import net.dv8tion.jda.api.entities.channel.concrete.Category;
+import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
+import net.dv8tion.jda.api.requests.GatewayIntent;
+
+/**
+ * Ende-zu-Ende gegen echtes Discord.
+ *
+ * Ein Bot kann seine eigenen Knoepfe nicht druecken — deshalb wird hier nicht
+ * die Interaktion nachgestellt, sondern {@link TicketService} direkt
+ * aufgerufen, mit dem Bot selbst als Eroeffner. Damit laeuft alles, was hinter
+ * dem Knopf haengt: Kanal anlegen, Kategorie waehlen, Berechtigungen setzen,
+ * Datenbank schreiben, umbenennen, schliessen.
+ *
+ * Laeuft nur mit TICKETBOT_TOKEN, TICKETBOT_TEST_GUILD und Datenbankzugang;
+ * sonst uebersprungen. Alle angelegten Kanaele werden wieder entfernt.
+ */
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+class DiscordEndToEndTest {
+
+	private JDA jda;
+	private Guild guild;
+	private Category kategorie;
+	private long panelId;
+	private String kanalId;
+	private boolean verfuegbar;
+
+	@BeforeAll
+	void setUp() throws Exception {
+		final String token = System.getenv("TICKETBOT_TOKEN");
+		final String guildId = System.getenv("TICKETBOT_TEST_GUILD");
+		final String dbUrl = System.getenv("TICKETBOT_DB_URL");
+		verfuegbar = token != null && !token.isBlank()
+				&& guildId != null && !guildId.isBlank()
+				&& dbUrl != null && !dbUrl.isBlank();
+		assumeTrue(verfuegbar, "TICKETBOT_TOKEN/TEST_GUILD/DB_URL fehlen — Ende-zu-Ende uebersprungen");
+
+		Database.init(dbUrl, System.getenv("TICKETBOT_DB_USER"),
+				System.getenv().getOrDefault("TICKETBOT_DB_PASSWORD", ""));
+		Database.applySchema();
+
+		jda = JDABuilder.createDefault(token)
+				.enableIntents(GatewayIntent.GUILD_MEMBERS)
+				.build()
+				.awaitReady();
+		guild = jda.getGuildById(guildId);
+		assertNotNull(guild, "Der Bot ist nicht auf dem Testserver");
+
+		// Globales Limit ausschalten, damit dieser Test nicht an einem
+		// Ueberbleibsel aus frueheren Laeufen scheitert.
+		GuildConfigDao.setGlobalLimit(guild.getId(), 0);
+
+		kategorie = guild.createCategory("e2e-test").complete();
+
+		panelId = PanelDao.create(guild.getId(), "e2e-" + System.currentTimeMillis());
+		PanelDao.set(panelId, "category_opened", kategorie.getId());
+		PanelDao.set(panelId, "name_pattern_open", "e2e-{count}");
+		PanelDao.set(panelId, "name_pattern_closed", "e2e-closed-{count}");
+		PanelDao.set(panelId, "counter", 40);
+		PanelDao.set(panelId, "counter_padding", 4);
+		PanelDao.set(panelId, "max_open_per_user", 1);
+	}
+
+	@AfterAll
+	void tearDown() {
+		if (!verfuegbar) {
+			return;
+		}
+		if (kanalId != null) {
+			final TextChannel kanal = guild.getTextChannelById(kanalId);
+			if (kanal != null) {
+				kanal.delete().complete();
+			}
+			TicketDao.byChannel(kanalId).ifPresent(t -> Database.update("DELETE FROM tickets WHERE id = ?", t.id()));
+		}
+		if (kategorie != null) {
+			kategorie.delete().complete();
+		}
+		Database.update("DELETE FROM panel_roles WHERE panel_id = ?", panelId);
+		Database.update("DELETE FROM panels WHERE id = ?", panelId);
+		Database.shutdown();
+		jda.shutdownNow();
+	}
+
+	// -----------------------------------------------------------------------
+
+	@Test
+	@Order(1)
+	@DisplayName("Ticket oeffnen legt Kanal, Kategorie, Rechte und Datenbankzeile korrekt an")
+	void oeffnen() {
+		final Panel panel = PanelDao.byId(panelId).orElseThrow();
+		final Member bot = guild.getSelfMember();
+
+		final TicketService.OpenResult result = TicketService.open(guild, panel, bot);
+		assertTrue(result.ok(), () -> "Oeffnen fehlgeschlagen: " + result.error());
+		kanalId = result.channel().getId();
+
+		final TextChannel kanal = result.channel();
+		assertEquals("e2e-0041", kanal.getName(), "Zaehler stand auf 40, Auffuellung auf 4 Stellen");
+		assertNotNull(kanal.getParentCategory());
+		assertEquals(kategorie.getId(), kanal.getParentCategory().getId());
+
+		// Der entscheidende Punkt: niemand ausser den Beteiligten darf hinein.
+		final PermissionOverride everyone = kanal.getPermissionOverride(guild.getPublicRole());
+		assertNotNull(everyone, "Fuer @everyone muss eine Ueberschreibung gesetzt sein");
+		assertTrue(everyone.getDenied().contains(Permission.VIEW_CHANNEL),
+				"@everyone darf das Ticket nicht sehen");
+
+		final PermissionOverride eroeffner = kanal.getPermissionOverride(bot);
+		assertNotNull(eroeffner);
+		assertTrue(eroeffner.getAllowed().containsAll(
+				EnumSet.of(Permission.VIEW_CHANNEL, Permission.MESSAGE_SEND, Permission.MESSAGE_HISTORY)),
+				"Der Eroeffner muss lesen und schreiben duerfen");
+
+		final Ticket ticket = TicketDao.byChannel(kanal.getId()).orElseThrow();
+		assertEquals(41, ticket.number());
+		assertEquals(bot.getId(), ticket.ownerId());
+		assertTrue(ticket.isOpen());
+		assertEquals("e2e-0041", ticket.channelName());
+	}
+
+	@Test
+	@Order(2)
+	@DisplayName("Das Panel-Limit greift beim zweiten Versuch")
+	void limitGreift() {
+		final Panel panel = PanelDao.byId(panelId).orElseThrow();
+		final TicketService.OpenResult zweiter = TicketService.open(guild, panel, guild.getSelfMember());
+
+		assertFalse(zweiter.ok(), "Ein zweites Ticket darf nicht entstehen");
+		assertNotNull(zweiter.error());
+		// Der Zaehler darf dabei nicht weiterlaufen: abgewiesen heisst, es wurde
+		// gar nichts angelegt.
+		assertEquals(41, PanelDao.byId(panelId).orElseThrow().counter(),
+				"Ein abgewiesener Versuch darf keine Nummer verbrauchen");
+	}
+
+	@Test
+	@Order(3)
+	@DisplayName("Schliessen benennt um und entzieht das Schreibrecht, laesst aber Lesezugriff")
+	void schliessen() {
+		final Panel panel = PanelDao.byId(panelId).orElseThrow();
+		final Ticket ticket = TicketDao.byChannel(kanalId).orElseThrow();
+
+		TicketService.close(guild, ticket, panel, guild.getSelfMember().getId(), "Test");
+
+		final TextChannel kanal = guild.getTextChannelById(kanalId);
+		assertNotNull(kanal);
+		assertEquals("e2e-closed-0041", kanal.getName());
+
+		final PermissionOverride eroeffner = kanal.getPermissionOverride(guild.getSelfMember());
+		assertNotNull(eroeffner);
+		assertTrue(eroeffner.getAllowed().contains(Permission.VIEW_CHANNEL),
+				"Der Eroeffner soll nachlesen koennen, was besprochen wurde");
+		assertTrue(eroeffner.getDenied().contains(Permission.MESSAGE_SEND),
+				"Aber nicht mehr schreiben");
+
+		final Ticket zu = TicketDao.byChannel(kanalId).orElseThrow();
+		assertFalse(zu.isOpen());
+		assertEquals("e2e-closed-0041", zu.channelName());
+	}
+
+	@Test
+	@Order(4)
+	@DisplayName("Nach dem Schliessen ist wieder ein Ticket moeglich")
+	void nachSchliessenWiederMoeglich() {
+		final Panel panel = PanelDao.byId(panelId).orElseThrow();
+		final TicketService.OpenResult result = TicketService.open(guild, panel, guild.getSelfMember());
+		assertTrue(result.ok(), () -> "Das Limit haengt: " + result.error());
+
+		// Aufraeumen: dieser Kanal gehoert nicht zum Rest des Tests.
+		final Optional<Ticket> neu = TicketDao.byChannel(result.channel().getId());
+		result.channel().delete().complete();
+		neu.ifPresent(t -> Database.update("DELETE FROM tickets WHERE id = ?", t.id()));
+	}
+}
