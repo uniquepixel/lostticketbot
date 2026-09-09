@@ -87,6 +87,19 @@ public final class TicketDao {
 		Database.update("UPDATE tickets SET claimed_by = ? WHERE id = ?", userId, ticketId);
 	}
 
+	/**
+	 * Traegt den echten Oeffnungszeitpunkt nach.
+	 *
+	 * Gebraucht bei der Uebernahme aus Ticket Tool: dort ist der Zeitpunkt des
+	 * Uebernehmens nicht der Zeitpunkt des Oeffnens - manche der uebernommenen
+	 * Tickets sind Jahre alt. Ohne das zeigt die Statistik alle am selben Tag
+	 * eroeffnet.
+	 */
+	public static void setOpenedAt(long ticketId, java.time.OffsetDateTime zeitpunkt) {
+		Database.update("UPDATE tickets SET opened_at = ? WHERE id = ?",
+				java.sql.Timestamp.from(zeitpunkt.toInstant()), ticketId);
+	}
+
 	public static void setChannelName(long ticketId, String name) {
 		Database.update("UPDATE tickets SET channel_name = ? WHERE id = ?", name, ticketId);
 	}

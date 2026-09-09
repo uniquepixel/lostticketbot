@@ -299,6 +299,11 @@ public final class AdoptionService {
 
 				final long id = TicketDao.create(guild.getId(), k.panel().id(), nummer,
 						k.channel().getId(), k.channel().getName(), k.ownerId());
+
+				// Der Kanal weiss, wann er entstanden ist - das ist der echte
+				// Oeffnungszeitpunkt. Ohne das traegt jedes uebernommene Ticket
+				// den Moment der Uebernahme, und die aeltesten sind Jahre alt.
+				TicketDao.setOpenedAt(id, k.channel().getTimeCreated());
 				if (k.geschlossen()) {
 					// Bewusst ohne Schliesser und ohne Grund: wer es damals
 					// geschlossen hat, steht nur im Ticket-Tool-Log.
