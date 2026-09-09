@@ -2,8 +2,10 @@ package migration;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -11,6 +13,7 @@ import java.util.regex.Pattern;
 import db.Database;
 import db.PanelDao;
 import db.TicketDao;
+import lostticketbot.Bot;
 import model.Panel;
 import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Guild;
@@ -85,7 +88,14 @@ public final class AdoptionService {
 		final List<Panel> panels = PanelDao.byGuild(guild.getId());
 		final List<Kandidat> gefunden = new ArrayList<>();
 
+		// Log- und Ablagekanaele ausnehmen. Dort hat Ticket Tool ebenfalls die
+		// erste Nachricht geschrieben — naemlich einen Transcript-Eintrag — und
+		// mit ihren Rechten sehen sie aus wie Tickets. Ohne diesen Ausschluss
+		// steht der Orga-Log-Kanal in der Vorschau.
+		final Set<String> ausgenommen = ausgenommeneKanaele(panels);
+
 		final List<TextChannel> verdaechtig = guild.getTextChannels().stream()
+				.filter(c -> !ausgenommen.contains(c.getId()))
 				.filter(c -> TicketDao.byChannel(c.getId()).isEmpty())
 				.filter(AdoptionService::siehtNachTicketAus)
 				.toList();
@@ -101,6 +111,21 @@ public final class AdoptionService {
 					.ifPresent(willkommen -> gefunden.add(auswerten(channel, willkommen, panels)));
 		}
 		return gefunden;
+	}
+
+	/** Die Log-Kanaele aller Panels und der Storage-Kanal — nie Tickets. */
+	private static Set<String> ausgenommeneKanaele(List<Panel> panels) {
+		final Set<String> aus = new HashSet<>();
+		for (final Panel p : panels) {
+			if (p.logChannelId() != null && !p.logChannelId().isBlank()) {
+				aus.add(p.logChannelId());
+			}
+		}
+		final String storage = Bot.storageChannelId();
+		if (storage != null && !storage.isBlank()) {
+			aus.add(storage);
+		}
+		return aus;
 	}
 
 	/**
@@ -210,7 +235,7 @@ public final class AdoptionService {
 						+ ", Willkommensnachricht auf " + ausTyp.get().name() + " — letzterer gefolgt");
 			}
 		} else {
-			hinweise.add("Nummer aus dem Namen nicht lesbar, auf 0 gesetzt");
+			hinweise.add("Nummer aus dem Namen nicht lesbar - beim Übernehmen wird die nächste vergeben");
 		}
 		if (ownerId == null) {
 			hinweise.add("Eröffner nicht erkennbar");
@@ -257,7 +282,14 @@ public final class AdoptionService {
 				continue;
 			}
 			try {
-				final long id = TicketDao.create(guild.getId(), k.panel().id(), k.nummer(),
+				// Nummer 0 heisst: aus dem Namen war keine zu lesen. Erst hier
+				// eine vergeben, nicht schon in der Vorschau — die soll keine
+				// Nummern verbrauchen, auch wenn man sie zehnmal aufruft.
+				final int nummer = k.nummer() > 0
+						? k.nummer()
+						: PanelDao.nextNumber(k.panel().id());
+
+				final long id = TicketDao.create(guild.getId(), k.panel().id(), nummer,
 						k.channel().getId(), k.channel().getName(), k.ownerId());
 				if (k.geschlossen()) {
 					// Bewusst ohne Schliesser und ohne Grund: wer es damals
