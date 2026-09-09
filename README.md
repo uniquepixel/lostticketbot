@@ -99,8 +99,14 @@ selbst, und ein versehentlich gelöschtes Menü kommt zurück.
 darf: nur das Team des jeweiligen Bereichs (Support-Rolle des Panels oder
 `Server verwalten`), ausdrücklich **nicht** der Eröffner. Sonst könnte ein abgelehnter
 Bewerber die Aufzeichnung seines eigenen Verhaltens verschwinden lassen — und genau
-die will die Orga im Zweifel nachlesen können. Der Verlauf wird vor dem Löschen
-archiviert und bleibt über `/transcript holen` abrufbar; nur der Kanal ist weg.
+die will die Orga im Zweifel nachlesen können.
+
+**Vor dem Löschen wird immer gesichert**, auch wenn beim Schließen schon archiviert
+wurde: nach dem Schließen verliert nur der Eröffner das Schreibrecht, der Mitschnitt
+läuft weiter, und was das Team danach noch besprochen hat, stünde sonst allein in der
+Datenbank — dem Teil, den dieses System ausdrücklich als wegwerfbar behandelt. Der
+Log-Kanal bekommt einen roten Eintrag „Ticket gelöscht" mit dem lesbaren Verlauf als
+Datei; der Verlauf bleibt über `/transcript holen` abrufbar, nur der Kanal ist weg.
 
 ## Betrieb
 

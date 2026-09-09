@@ -303,14 +303,17 @@ public final class TicketService {
 	 * Sekunde spaeter zu loeschen, waeren zwei Discord-Aufrufe fuer nichts.
 	 */
 	public static void delete(Guild guild, Ticket ticket, Panel panel, String byUserId) {
-		if (panel != null && !TranscriptArchiver.istArchiviert(ticket.id())) {
-			if (ticket.isOpen()) {
-				TicketDao.close(ticket.id(), byUserId, "vor dem Löschen geschlossen",
-						ticket.channelName());
-			}
-			TicketDao.byId(ticket.id()).ifPresent(
-					aktuell -> TranscriptArchiver.archive(guild, aktuell, panel, byUserId));
+		if (ticket.isOpen()) {
+			TicketDao.close(ticket.id(), byUserId, "vor dem Löschen geschlossen",
+					ticket.channelName());
 		}
+		// Auch dann, wenn beim Schliessen schon archiviert wurde: nach dem
+		// Schliessen schreibt der Mitschnitt weiter, und was das Team danach
+		// noch besprochen hat, stuende sonst nur in der Datenbank — dem Teil,
+		// den dieses System ausdruecklich als wegwerfbar behandelt.
+		TicketDao.byId(ticket.id()).ifPresent(
+				aktuell -> TranscriptArchiver.archiviereVorDemLoeschen(
+						guild, aktuell, panel, byUserId));
 
 		final TextChannel channel = guild.getTextChannelById(ticket.channelId());
 		if (channel != null) {

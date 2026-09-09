@@ -243,6 +243,13 @@ class DiscordEndToEndTest {
 
 		assertTrue(kanalIstWeg(kanalId), "Der Kanal steht noch auf dem Server");
 
+		// Der Kanal ist weg — der Nachweis, dass es ihn gab, muss bleiben.
+		final var loeschEintrag = logEintragMitTitel("Ticket gelöscht");
+		assertNotNull(loeschEintrag, "Im Log-Kanal fehlt der Lösch-Eintrag");
+		assertEquals(1, loeschEintrag.getAttachments().size(),
+				"Auch beim Löschen muss der Verlauf als Datei mitgehen");
+		assertTrue(loeschEintrag.getAttachments().get(0).getFileName().endsWith(".html"));
+
 		// Entscheidend: die Zeile bleibt. Ein geloeschtes Ticket ist nicht
 		// vergessen — Nummer, Eroeffner und Verlauf sind weiter abrufbar,
 		// gerade weil der Kanal weg ist.
@@ -253,6 +260,26 @@ class DiscordEndToEndTest {
 		assertEquals(ticket.ownerId(), nachher.ownerId());
 
 		kanalId = null;   // tearDown muss ihn nicht mehr aufraeumen
+	}
+
+	/** Wartet auf einen Log-Eintrag mit diesem Titel. postLog schickt asynchron. */
+	private net.dv8tion.jda.api.entities.Message logEintragMitTitel(String titel) {
+		for (int versuch = 0; versuch < 20; versuch++) {
+			final var treffer = logKanal.getHistory().retrievePast(10).complete().stream()
+					.filter(m -> m.getEmbeds().stream()
+							.anyMatch(e -> titel.equals(e.getTitle())))
+					.findFirst();
+			if (treffer.isPresent()) {
+				return treffer.get();
+			}
+			try {
+				Thread.sleep(500);
+			} catch (final InterruptedException e) {
+				Thread.currentThread().interrupt();
+				return null;
+			}
+		}
+		return null;
 	}
 
 	/** Discord bestaetigt das Loeschen, der Cache zieht ueber das Gateway nach. */

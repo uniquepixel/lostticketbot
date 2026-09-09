@@ -22,7 +22,6 @@ import net.dv8tion.jda.api.interactions.components.buttons.Button;
 import ticket.TicketInteractions;
 import ticket.TicketService;
 import ticket.Visibility;
-import transcript.TranscriptArchiver;
 import util.MessageUtil;
 
 /**
@@ -209,11 +208,8 @@ public class TicketCommand extends ListenerAdapter {
 			return;
 		}
 
-		final String hinweis = TranscriptArchiver.istArchiviert(ticket.id())
-				? "Der Verlauf ist bereits archiviert und bleibt über `/transcript holen id:"
-						+ ticket.id() + "` abrufbar."
-				: "Der Verlauf wird vorher archiviert und bleibt über `/transcript holen id:"
-						+ ticket.id() + "` abrufbar.";
+		final String hinweis = "Der Verlauf wird vorher gesichert und bleibt über "
+				+ "`/transcript holen id:" + ticket.id() + "` abrufbar.";
 
 		event.replyEmbeds(MessageUtil.error(
 				"**" + ticket.channelName() + "** wirklich löschen?\n\n"

@@ -38,34 +38,82 @@ public final class TranscriptArchiver {
 			String content, String sentAt, String editedAt, String deletedAt) {
 	}
 
-	/**
-	 * Liegt fuer dieses Ticket schon ein Archiv-Post im Storage-Kanal?
-	 *
-	 * Gebraucht beim Loeschen: ein zweites Archivieren wuerde einen zweiten
-	 * Log-Eintrag schreiben und im Kanal so aussehen, als waere das Ticket
-	 * zweimal geschlossen worden.
-	 */
+	/** Warum archiviert wird — das aendert den Log-Eintrag und die DM. */
+	public enum Anlass {
+		GESCHLOSSEN, GELOESCHT
+	}
+
+	/** Liegt fuer dieses Ticket schon ein Archiv-Post im Storage-Kanal? */
 	public static boolean istArchiviert(long ticketId) {
 		return Database.count("SELECT COUNT(*) FROM transcript_archives WHERE ticket_id = ?",
 				ticketId) > 0;
 	}
 
+	/**
+	 * Ist das vorhandene Archiv noch vollstaendig?
+	 *
+	 * Nach dem Schliessen verliert der Eroeffner das Schreibrecht, das Team
+	 * aber nicht — und der Mitschnitt laeuft weiter. Ein Archiv vom
+	 * Schliesszeitpunkt kennt diese spaeteren Nachrichten nicht. Solange der
+	 * Kanal steht, faellt das nicht auf; wird er geloescht, waeren sie nur noch
+	 * in der Datenbank, und die ist ausdruecklich der wegwerfbare Teil.
+	 */
+	static boolean archivIstAktuell(long ticketId) {
+		return Database.count(
+				"SELECT COUNT(*) FROM transcript_archives a "
+						+ "WHERE a.ticket_id = ? AND NOT EXISTS ("
+						+ "  SELECT 1 FROM ticket_messages m "
+						+ "  WHERE m.ticket_id = a.ticket_id AND m.sent_at > a.archived_at)",
+				ticketId) > 0;
+	}
+
+	/**
+	 * Sichert den Verlauf, bevor der Kanal faellt.
+	 *
+	 * Das Archiv wird nur dann neu geschrieben, wenn es fehlt oder Luecken hat
+	 * — der Log-Eintrag dagegen immer: er ist der Nachweis, WER geloescht hat,
+	 * und traegt die lesbare Datei ein letztes Mal, denn danach gibt es den
+	 * Kanal nicht mehr, in dem man haette nachsehen koennen.
+	 */
+	public static void archiviereVorDemLoeschen(Guild guild, Ticket ticket, Panel panel,
+			String byUserId) {
+		archive(guild, ticket, panel, byUserId, Anlass.GELOESCHT);
+	}
+
 	public static void archive(Guild guild, Ticket ticket, Panel panel, String closedBy) {
+		archive(guild, ticket, panel, closedBy, Anlass.GESCHLOSSEN);
+	}
+
+	private static void archive(Guild guild, Ticket ticket, Panel panel, String closedBy,
+			Anlass anlass) {
 		final List<Row> rows = loadRows(ticket.id());
 		final Map<String, Integer> perAuthor = countPerAuthor(rows);
 
+		// Beim Loeschen nur neu schreiben, wenn das vorhandene Archiv fehlt oder
+		// Luecken hat. Sonst bliebe der alte Post als Leiche im Storage-Kanal
+		// zurueck, waehrend der Zeiger schon auf den neuen zeigt.
+		final boolean neuSchreiben = anlass == Anlass.GESCHLOSSEN
+				|| !archivIstAktuell(ticket.id());
+
 		String archiveMessageId = null;
 		final TextChannel storage = storageChannel();
-		if (storage != null) {
+		if (storage != null && neuSchreiben) {
 			archiveMessageId = writeArchive(storage, ticket, panel, closedBy, rows);
-		} else {
+		} else if (storage == null) {
 			System.err.println("Kein Storage-Kanal — Ticket " + ticket.channelName()
 					+ " wird nicht archiviert. Der Verlauf steht weiterhin in der Datenbank.");
+		} else {
+			archiveMessageId = Database.queryOne(
+					"SELECT storage_message_id FROM transcript_archives WHERE ticket_id = ?",
+					rs -> rs.getString(1), ticket.id()).orElse(null);
 		}
 
-		postLog(guild, ticket, panel, closedBy, rows.size(), perAuthor, archiveMessageId);
+		postLog(guild, ticket, panel, closedBy, rows.size(), perAuthor, archiveMessageId, anlass);
 
-		if (panel.dmOnClose()) {
+		// Beim Loeschen keine DM: geschlossen wurde vorher schon einmal
+		// gemeldet, und "dein Ticket wurde geschlossen" zum zweiten Mal
+		// verwirrt mehr, als es erklaert.
+		if (anlass == Anlass.GESCHLOSSEN && panel != null && panel.dmOnClose()) {
 			// retrieveUserById statt Member: wer den Server verlassen hat, ist
 			// kein Mitglied mehr - und gerade dann wird oft geschlossen.
 			guild.getJDA().retrieveUserById(ticket.ownerId()).queue(
@@ -117,7 +165,7 @@ public final class TranscriptArchiver {
 			final ObjectNode root = JSON.createObjectNode();
 			root.put("ticket_id", ticket.id());
 			root.put("guild_id", ticket.guildId());
-			root.put("panel", panel.name());
+			root.put("panel", panel == null ? null : panel.name());
 			root.put("number", ticket.number());
 			root.put("channel_id", ticket.channelId());
 			root.put("channel_name", ticket.channelName());
@@ -164,7 +212,8 @@ public final class TranscriptArchiver {
 
 			// Die Metadaten stehen bewusst auch im Klartext, damit der Kanal
 			// ohne Datenbank durchsuchbar bleibt.
-			final String header = "**" + ticket.channelName() + "** · Panel `" + panel.name()
+			final String header = "**" + ticket.channelName() + "** · Panel `"
+					+ (panel == null ? "—" : panel.name())
 					+ "` · Owner <@" + ticket.ownerId() + "> · "
 					+ rows.size() + " Nachrichten · Ticket-ID " + ticket.id();
 
@@ -189,8 +238,12 @@ public final class TranscriptArchiver {
 
 	/** Der Log-Eintrag im Kanal des Panels — bewusst nah an dem, was Ticket Tool schreibt. */
 	private static void postLog(Guild guild, Ticket ticket, Panel panel, String closedBy,
-			int messageCount, Map<String, Integer> perAuthor, String archiveMessageId) {
-		if (panel.logChannelId() == null || panel.logChannelId().isBlank()) {
+			int messageCount, Map<String, Integer> perAuthor, String archiveMessageId,
+			Anlass anlass) {
+		// Ohne Panel gibt es keinen Log-Kanal, an den man den Eintrag haengen
+		// koennte. Der Verlauf ist trotzdem gesichert — das Archiv haengt am
+		// Storage-Kanal, nicht am Panel.
+		if (panel == null || panel.logChannelId() == null || panel.logChannelId().isBlank()) {
 			return;
 		}
 		final TextChannel log = guild.getTextChannelById(panel.logChannelId());
@@ -206,13 +259,22 @@ public final class TranscriptArchiver {
 				.limit(10)
 				.forEach(e -> participants.append(e.getValue()).append(" · <@").append(e.getKey()).append(">\n"));
 
+		final boolean geloescht = anlass == Anlass.GELOESCHT;
 		final EmbedBuilder embed = new EmbedBuilder()
-				.setColor(new java.awt.Color(0x1ec45c))
+				.setColor(new java.awt.Color(geloescht ? 0xC0392B : 0x1ec45c))
 				.addField("Ticket", ticket.channelName(), true)
 				.addField("Panel", panel.name(), true)
 				.addField("Eröffner", "<@" + ticket.ownerId() + ">", true)
-				.addField("Geschlossen von", closedBy == null ? "automatisch" : "<@" + closedBy + ">", true)
+				.addField(geloescht ? "Gelöscht von" : "Geschlossen von",
+						closedBy == null ? "automatisch" : "<@" + closedBy + ">", true)
 				.addField("Nachrichten", String.valueOf(messageCount), true);
+		if (geloescht) {
+			// Der Kanal ist gleich weg. Wer spaeter sucht, soll hier sehen,
+			// dass es ihn gab und wo der Verlauf liegt.
+			embed.setTitle("Ticket gelöscht");
+			embed.setDescription("Der Kanal wurde entfernt. Der Verlauf bleibt über "
+					+ "`/transcript holen id:" + ticket.id() + "` abrufbar.");
+		}
 
 		if (participants.length() > 0) {
 			embed.addField("Beteiligte", participants.toString(), false);
