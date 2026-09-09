@@ -15,6 +15,7 @@ import lostticketbot.Bot;
 import model.Panel;
 import model.Ticket;
 import ticket.Visibility;
+import transcript.AnhangUrl;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
 
@@ -62,6 +63,39 @@ public final class TicketEndpoints {
 			throw new IllegalArgumentException("Parameter 'guild' fehlt");
 		}
 		return guildId;
+	}
+
+	// -----------------------------------------------------------------------
+	// /api/guilds
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Auf welchen Servern hat dieser Nutzer ueberhaupt etwas zu sehen?
+	 *
+	 * Damit muss die Website keine Server-IDs kennen. Sie fragt hier, bekommt
+	 * genau die Server zurueck, fuer die der Anfragende Rechte hat, und haengt
+	 * ihre weiteren Abfragen an die gelieferten IDs. Wer nirgends Support-Rolle
+	 * hat, bekommt eine leere Liste — und die Website zeigt gar kein Dashboard,
+	 * statt eines mit lauter Nullen.
+	 */
+	public static Object guilds(Anfrage anfrage) {
+		final List<Map<String, Object>> aus = new ArrayList<>();
+		if (Bot.jda() == null) {
+			return TicketApiServer.liste(aus, 0);
+		}
+		for (final Guild guild : Bot.jda().getGuilds()) {
+			final List<Panel> sichtbar = Visibility.sichtbarePanels(guild, anfrage.discordUserId());
+			if (sichtbar.isEmpty()) {
+				continue;
+			}
+			final Map<String, Object> m = new LinkedHashMap<>();
+			m.put("id", guild.getId());
+			m.put("name", guild.getName());
+			m.put("icon", guild.getIconUrl());
+			m.put("panels", sichtbar.size());
+			aus.add(m);
+		}
+		return TicketApiServer.liste(aus, aus.size());
 	}
 
 	// -----------------------------------------------------------------------
@@ -141,7 +175,9 @@ public final class TicketEndpoints {
 					m.put("channel_id", rs.getString("channel_id"));
 					m.put("channel_name", rs.getString("channel_name"));
 					m.put("owner_id", rs.getString("owner_id"));
+					m.put("owner_name", name(guildId, rs.getString("owner_id")));
 					m.put("claimed_by", rs.getString("claimed_by"));
+					m.put("claimed_by_name", name(guildId, rs.getString("claimed_by")));
 					m.put("status", rs.getString("status"));
 					m.put("opened_at", String.valueOf(rs.getTimestamp("opened_at")));
 					m.put("closed_at", String.valueOf(rs.getTimestamp("closed_at")));
@@ -171,7 +207,9 @@ public final class TicketEndpoints {
 		kopf.put("number", ticket.number());
 		kopf.put("channel_name", ticket.channelName());
 		kopf.put("owner_id", ticket.ownerId());
+		kopf.put("owner_name", name(ticket.guildId(), ticket.ownerId()));
 		kopf.put("claimed_by", ticket.claimedBy());
+		kopf.put("claimed_by_name", name(ticket.guildId(), ticket.claimedBy()));
 		kopf.put("status", ticket.status().dbValue());
 		kopf.put("opened_at", String.valueOf(ticket.openedAt()));
 		kopf.put("closed_at", String.valueOf(ticket.closedAt()));
@@ -182,6 +220,7 @@ public final class TicketEndpoints {
 		// Anhaenge werden je Nachricht zugeordnet, damit sie im Verlauf an der
 		// richtigen Stelle stehen.
 		final Map<Long, List<Map<String, Object>>> anhaenge = new HashMap<>();
+		final List<Map<String, Object>> alleAnhaenge = new ArrayList<>();
 		Database.query(
 				"SELECT * FROM ticket_attachments WHERE ticket_id = ? ORDER BY id",
 				rs -> {
@@ -193,8 +232,19 @@ public final class TicketEndpoints {
 					a.put("storage_message_id", rs.getString("storage_message_id"));
 					anhaenge.computeIfAbsent(rs.getLong("ticket_message_id"),
 							k -> new ArrayList<>()).add(a);
+					alleAnhaenge.add(a);
 					return null;
 				}, ticket.id());
+
+		// Die Adressen erst NACH der Abfrage holen: jede kostet einen Aufruf zu
+		// Discord, und den waehrend einer offenen Datenbankverbindung zu machen
+		// haelt eine Verbindung aus dem Pool fest, bis Discord antwortet.
+		for (final Map<String, Object> a : alleAnhaenge) {
+			a.put("url", AnhangUrl.frisch(
+					String.valueOf(a.get("storage_channel_id")),
+					String.valueOf(a.get("storage_message_id")),
+					String.valueOf(a.get("filename"))));
+		}
 
 		final List<Map<String, Object>> verlauf = Database.query(
 				"SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY sent_at, id",
@@ -312,6 +362,26 @@ public final class TicketEndpoints {
 		m.put("per_day", proTag);
 
 		return m;
+	}
+
+	/**
+	 * Ein Anzeigename zur Discord-ID, soweit der Bot ihn kennt.
+	 *
+	 * Nur aus dem Cache — der ist wegen {@code MemberCachePolicy.ALL}
+	 * vollstaendig, und eine Abfrage bei Discord je Zeile wuerde eine Liste mit
+	 * fuenfzig Tickets in fuenfzig Aufrufe verwandeln. Wer nicht mehr auf dem
+	 * Server ist, bleibt {@code null}; die Website zeigt dann die ID.
+	 */
+	private static String name(String guildId, String userId) {
+		if (userId == null || Bot.jda() == null) {
+			return null;
+		}
+		final Guild guild = Bot.jda().getGuildById(guildId);
+		if (guild == null) {
+			return null;
+		}
+		final Member member = guild.getMemberById(userId);
+		return member == null ? null : member.getEffectiveName();
 	}
 
 	private static String platzhalter(int anzahl) {

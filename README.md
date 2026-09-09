@@ -86,13 +86,57 @@ Ticketkanal selbst.
 |---|---|
 | `/panel erstellen \| liste \| zeigen \| setzen \| rolle` | Ticket-Typen |
 | `/menu erstellen \| text \| hinzufuegen \| entfernen \| posten \| liste` | Menüs |
-| `/ticket beanspruchen \| freigeben \| hinzufuegen \| entfernen \| umbenennen \| wiedereroeffnen \| info` | im Ticket |
+| `/ticket beanspruchen \| freigeben \| hinzufuegen \| entfernen \| umbenennen \| wiedereroeffnen \| loeschen \| info` | im Ticket |
+| `/transcript hier \| holen \| suchen` | Verlauf als Datei |
 | `/altdaten importieren \| stand` | Übernahme aus Ticket Tool |
 
 Ein Panel wird angelegt, mit `/panel setzen` konfiguriert, per `/menu hinzufuegen` in ein
 Menü gehängt und mit `/menu posten` sichtbar gemacht. Menüs werden bei jedem Start mit der
 Konfiguration abgeglichen — eine Änderung wirkt also spätestens nach einem Neustart von
 selbst, und ein versehentlich gelöschtes Menü kommt zurück.
+
+`/ticket loeschen` ist der einzige Ticketbefehl, den nicht jeder im Kanal ausführen
+darf: nur das Team des jeweiligen Bereichs (Support-Rolle des Panels oder
+`Server verwalten`), ausdrücklich **nicht** der Eröffner. Sonst könnte ein abgelehnter
+Bewerber die Aufzeichnung seines eigenen Verhaltens verschwinden lassen — und genau
+die will die Orga im Zweifel nachlesen können. Der Verlauf wird vor dem Löschen
+archiviert und bleibt über `/transcript holen` abrufbar; nur der Kanal ist weg.
+
+## Betrieb
+
+Der Bot läuft als systemd-Dienst auf dem Homeserver, dort, wo auch die Datenbank
+liegt:
+
+```bash
+./setup/03-deploy-homeserver.sh
+```
+
+Baut, lädt hoch, vergleicht die Prüfsumme, tauscht das Jar per `mv` und startet den
+Dienst neu. Mehrfach ausführbar; vorhandene Zugangsdaten bleiben unangetastet.
+
+```bash
+ssh jonas@192.168.178.67 'systemctl --user status lostticketbot'
+ssh jonas@192.168.178.67 'journalctl --user -u lostticketbot -f'
+```
+
+Vor dem 10.09.2026 lief der Bot als Vordergrundprozess auf einem Laptop, mit einem
+SSH-Tunnel zur Datenbank und Umgebungsvariablen, die nirgends aufgeschrieben waren.
+Zugeklappter Deckel hieß: kein Ticketsystem auf beiden Discords, und niemand außer
+dem Startenden wusste, wie man es wieder hochbekommt.
+
+## Dashboard-API
+
+Mit gesetztem `TICKETBOT_API_PORT` bietet der Bot eine REST-Schnittstelle für die
+Website: `/api/guilds`, `/api/stats`, `/api/panels`, `/api/tickets`,
+`/api/tickets/{id}`, `/api/legacy` und `/api/health`.
+
+**Über die Sichtbarkeit entscheidet der Bot, nicht die Website.** Er prüft die echten
+Discord-Rollen des Anfragenden gegen die Support-Rollen des jeweiligen Panels. Die
+Website reicht in `X-Discord-User` nur durch, wer gerade eingeloggt ist — aus ihrem
+verifizierten JWT, nie aus einem Header des Browsers.
+
+Die Schnittstelle lauscht auf `127.0.0.1`. Läuft die Website auf einem anderen
+Rechner, braucht es dorthin einen Tunnel.
 
 ## Übernahme der Alt-Transcripts
 

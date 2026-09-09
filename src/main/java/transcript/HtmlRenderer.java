@@ -217,23 +217,12 @@ public final class HtmlRenderer {
 	 */
 	private static Map<String, String> urlsAuffrischen(Map<Long, List<Anhang>> anhaenge) {
 		final Map<String, String> urls = new HashMap<>();
-		if (Bot.jda() == null) {
-			return urls;
-		}
 		for (final List<Anhang> liste : anhaenge.values()) {
 			for (final Anhang a : liste) {
-				final TextChannel storage = Bot.jda().getTextChannelById(a.storageChannelId());
-				if (storage == null) {
-					continue;
-				}
-				try {
-					final Message m = storage.retrieveMessageById(a.storageMessageId()).complete();
-					m.getAttachments().stream()
-							.filter(att -> att.getFileName().equals(a.dateiname()))
-							.findFirst()
-							.ifPresent(att -> urls.put(schluessel(a), att.getUrl()));
-				} catch (final RuntimeException e) {
-					System.err.println("Anhang " + a.dateiname() + " nicht abrufbar: " + e.getMessage());
+				final String url = AnhangUrl.frisch(a.storageChannelId(), a.storageMessageId(),
+						a.dateiname());
+				if (url != null) {
+					urls.put(schluessel(a), url);
 				}
 			}
 		}

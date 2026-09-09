@@ -42,16 +42,32 @@ public class TicketApiServer {
 
 	public void start() throws IOException {
 		server = HttpServer.create(new InetSocketAddress(port), 0);
-		server.createContext("/api/tickets", exchange -> route(exchange, TicketEndpoints::tickets));
-		server.createContext("/api/panels", exchange -> route(exchange, TicketEndpoints::panels));
-		server.createContext("/api/stats", exchange -> route(exchange, TicketEndpoints::stats));
-		server.createContext("/api/legacy", exchange -> route(exchange, TicketEndpoints::legacy));
+		registriere("/api/tickets", TicketEndpoints::tickets);
+		registriere("/api/panels", TicketEndpoints::panels);
+		registriere("/api/guilds", TicketEndpoints::guilds);
+		registriere("/api/stats", TicketEndpoints::stats);
+		registriere("/api/legacy", TicketEndpoints::legacy);
 		server.createContext("/api/health", exchange -> {
 			antworten(exchange, 200, Map.of("status", "ok"));
 		});
-		server.setExecutor(Executors.newFixedThreadPool(4));
+		// Acht statt vier: eine einzige Dashboard-Seite feuert vier Abfragen
+		// parallel, und die Sichtbarkeitspruefung fragt notfalls blockierend bei
+		// Discord nach. Mit vier Threads blockiert ein zweiter Betrachter den
+		// ersten.
+		server.setExecutor(Executors.newFixedThreadPool(8));
 		server.start();
 		System.out.println("Dashboard-API laeuft auf Port " + port);
+	}
+
+	/**
+	 * Haengt einen Endpunkt an einen Pfad.
+	 *
+	 * Sichtbar fuer den Test, damit der einen Endpunkt einhaengen kann, der
+	 * absichtlich scheitert — nur so laesst sich pruefen, dass auch dann eine
+	 * Antwort rausgeht statt einer haengenden Verbindung.
+	 */
+	void registriere(String pfad, Endpunkt endpunkt) {
+		server.createContext(pfad, exchange -> route(exchange, endpunkt));
 	}
 
 	public void stop() {
@@ -119,9 +135,20 @@ public class TicketApiServer {
 			// Bewusst 404 statt 403: wer ein Ticket nicht sehen darf, soll auch
 			// nicht erfahren, dass es existiert.
 			antworten(exchange, 404, Map.of("error", "Nicht gefunden"));
-		} catch (final Exception e) {
+		} catch (final Throwable e) {
+			// Throwable, nicht Exception. Ein Error — etwa ein
+			// NoClassDefFoundError aus einem unvollstaendigen Fatjar — beendet
+			// sonst den Arbeitsthread, OHNE dass je eine Antwort rausgeht: der
+			// Aufrufer haengt bis zu seinem eigenen Timeout und sieht keinen
+			// Grund. Genau das ist am 09.09.2026 passiert und war von aussen
+			// nicht von einem haengenden Server zu unterscheiden.
 			System.err.println("Dashboard-API: " + exchange.getRequestURI() + " -> " + e);
-			antworten(exchange, 500, Map.of("error", "Interner Fehler"));
+			e.printStackTrace();
+			try {
+				antworten(exchange, 500, Map.of("error", "Interner Fehler"));
+			} catch (final Throwable ignored) {
+				exchange.close();
+			}
 		}
 	}
 

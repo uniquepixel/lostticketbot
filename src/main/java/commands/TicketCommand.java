@@ -216,12 +216,8 @@ public class TicketCommand extends ListenerAdapter {
 						+ ticket.id() + "` abrufbar.";
 
 		event.replyEmbeds(MessageUtil.error(
-				"**" + ticket.channelName() + "** wirklich löschen?
-
-"
-						+ hinweis + "
-
-Der Kanal selbst ist danach weg — das lässt sich nicht "
+				"**" + ticket.channelName() + "** wirklich löschen?\n\n"
+						+ hinweis + "\n\nDer Kanal selbst ist danach weg — das lässt sich nicht "
 						+ "rückgängig machen."))
 				.setEphemeral(true)
 				.setComponents(ActionRow.of(
