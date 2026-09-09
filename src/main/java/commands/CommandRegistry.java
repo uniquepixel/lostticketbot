@@ -89,7 +89,22 @@ public final class CommandRegistry {
 								new SubcommandData("importieren", "Einen Ticket-Tool-Log-Kanal einlesen")
 										.addOption(OptionType.CHANNEL, "kanal",
 												"Der Log-Kanal mit den Transcript-Anhängen", true),
-								new SubcommandData("stand", "Wie viel ist übernommen")))
+								new SubcommandData("stand", "Wie viel ist übernommen")),
+
+				// Ohne Rechtebeschraenkung: die Befehle wirken nur im Ticketkanal,
+				// und dort ist ohnehin nur drin, wer hineingehoert.
+				Commands.slash(TicketCommand.NAME, "Aktionen im Ticket")
+						.addSubcommands(
+								new SubcommandData("beanspruchen", "Dieses Ticket übernehmen"),
+								new SubcommandData("freigeben", "Die Betreuung wieder abgeben"),
+								new SubcommandData("hinzufuegen", "Jemanden ins Ticket holen")
+										.addOption(OptionType.USER, "user", "Wen", true),
+								new SubcommandData("entfernen", "Jemanden aus dem Ticket nehmen")
+										.addOption(OptionType.USER, "user", "Wen", true),
+								new SubcommandData("umbenennen", "Kanal umbenennen")
+										.addOption(OptionType.STRING, "name", "Neuer Name", true),
+								new SubcommandData("wiedereroeffnen", "Geschlossenes Ticket wieder öffnen"),
+								new SubcommandData("info", "Details zu diesem Ticket")))
 				.queue(
 						ok -> System.out.println("  Befehle angemeldet für " + guild.getName()),
 						err -> System.err.println("  Befehle für " + guild.getName()
