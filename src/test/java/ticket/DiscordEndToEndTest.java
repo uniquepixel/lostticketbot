@@ -53,6 +53,7 @@ class DiscordEndToEndTest {
 	private JDA jda;
 	private Guild guild;
 	private Category kategorie;
+	private TextChannel logKanal;
 	private long panelId;
 	private String kanalId;
 	private boolean verfuegbar;
@@ -83,6 +84,7 @@ class DiscordEndToEndTest {
 		GuildConfigDao.setGlobalLimit(guild.getId(), 0);
 
 		kategorie = guild.createCategory("e2e-test").complete();
+		logKanal = guild.createTextChannel("e2e-log").setParent(kategorie).complete();
 
 		panelId = PanelDao.create(guild.getId(), "e2e-" + System.currentTimeMillis());
 		PanelDao.set(panelId, "category_opened", kategorie.getId());
@@ -91,6 +93,7 @@ class DiscordEndToEndTest {
 		PanelDao.set(panelId, "counter", 40);
 		PanelDao.set(panelId, "counter_padding", 4);
 		PanelDao.set(panelId, "max_open_per_user", 1);
+		PanelDao.set(panelId, "log_channel_id", logKanal.getId());
 	}
 
 	@AfterAll
@@ -104,6 +107,9 @@ class DiscordEndToEndTest {
 				kanal.delete().complete();
 			}
 			TicketDao.byChannel(kanalId).ifPresent(t -> Database.update("DELETE FROM tickets WHERE id = ?", t.id()));
+		}
+		if (logKanal != null) {
+			logKanal.delete().complete();
 		}
 		if (kategorie != null) {
 			kategorie.delete().complete();
@@ -192,6 +198,41 @@ class DiscordEndToEndTest {
 	}
 
 	@Test
+	@Order(4)
+	@DisplayName("Der Log-Eintrag traegt den lesbaren Verlauf als Datei — wie bei Ticket Tool")
+	void logEintragMitDatei() {
+		final Panel panel = PanelDao.byId(panelId).orElseThrow();
+		final Ticket ticket = TicketDao.byId(TicketDao.byChannel(kanalId).orElseThrow().id()).orElseThrow();
+
+		transcript.TranscriptArchiver.archive(guild, ticket, panel, guild.getSelfMember().getId());
+
+		// postLog schickt asynchron; auf die Nachricht warten statt zu raten.
+		net.dv8tion.jda.api.entities.Message eintrag = null;
+		for (int versuch = 0; versuch < 20 && eintrag == null; versuch++) {
+			final var neueste = logKanal.getHistory().retrievePast(5).complete();
+			eintrag = neueste.stream()
+					.filter(m -> !m.getEmbeds().isEmpty())
+					.findFirst().orElse(null);
+			if (eintrag == null) {
+				try {
+					Thread.sleep(500);
+				} catch (final InterruptedException e) {
+					Thread.currentThread().interrupt();
+				}
+			}
+		}
+
+		assertNotNull(eintrag, "Im Log-Kanal steht kein Eintrag");
+		assertEquals(1, eintrag.getAttachments().size(), "Die Transcript-Datei fehlt am Log-Eintrag");
+		final var datei = eintrag.getAttachments().get(0);
+		assertTrue(datei.getFileName().endsWith(".html"),
+				"Erwartet wird eine HTML-Datei, nicht " + datei.getFileName());
+		assertTrue(datei.getFileName().contains(ticket.channelName()),
+				"Der Dateiname soll das Ticket benennen: " + datei.getFileName());
+		assertTrue(datei.getSize() > 500, "Verdaechtig kleine Datei: " + datei.getSize() + " Bytes");
+	}
+
+	@Test
 	@Order(5)
 	@DisplayName("Loeschen entfernt den Kanal, das Ticket bleibt als Datensatz erhalten")
 	void loeschen() {
@@ -231,7 +272,7 @@ class DiscordEndToEndTest {
 	}
 
 	@Test
-	@Order(4)
+	@Order(6)
 	@DisplayName("Nach dem Schliessen ist wieder ein Ticket moeglich")
 	void nachSchliessenWiederMoeglich() {
 		final Panel panel = PanelDao.byId(panelId).orElseThrow();
