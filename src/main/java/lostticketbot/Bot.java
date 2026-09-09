@@ -14,6 +14,7 @@ import commands.LegacyCommand;
 import commands.MenuCommand;
 import commands.PanelCommand;
 import commands.TicketCommand;
+import commands.TranscriptCommand;
 import db.MenuDao;
 import db.PanelDao;
 import db.TicketDao;
@@ -89,7 +90,7 @@ public class Bot extends ListenerAdapter {
 				.setChunkingFilter(ChunkingFilter.ALL)
 				.setActivity(Activity.listening("eure Anliegen"))
 				.addEventListeners(new Bot(), new TicketInteractions(), new TranscriptRecorder(),
-						new PanelCommand(), new MenuCommand(), new LegacyCommand(), new TicketCommand(), new ConfigCommand(), new AdoptCommand())
+						new PanelCommand(), new MenuCommand(), new LegacyCommand(), new TicketCommand(), new ConfigCommand(), new AdoptCommand(), new TranscriptCommand())
 				.build();
 
 		Runtime.getRuntime().addShutdownHook(new Thread(() -> {

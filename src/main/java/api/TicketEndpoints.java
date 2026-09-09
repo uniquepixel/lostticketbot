@@ -2,12 +2,10 @@ package api;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 import api.TicketApiServer.Anfrage;
 import db.Database;
@@ -16,7 +14,7 @@ import db.TicketDao;
 import lostticketbot.Bot;
 import model.Panel;
 import model.Ticket;
-import net.dv8tion.jda.api.Permission;
+import ticket.Visibility;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
 
@@ -47,33 +45,7 @@ public final class TicketEndpoints {
 	 * Anfuehrer nachlesen, wer sich ueber ihn beschwert hat.
 	 */
 	static List<Panel> sichtbarePanels(String guildId, String discordUserId) {
-		final Guild guild = guild(guildId);
-		final Member member = mitglied(guild, discordUserId);
-		final List<Panel> alle = PanelDao.byGuild(guildId);
-
-		if (member == null) {
-			return List.of();   // nicht auf dem Server: sieht nichts
-		}
-		if (darfAllesSehen(guild, member)) {
-			return alle;
-		}
-
-		final Set<String> eigeneRollen = new HashSet<>();
-		member.getRoles().forEach(r -> eigeneRollen.add(r.getId()));
-
-		final List<Panel> sichtbar = new ArrayList<>();
-		for (final Panel panel : alle) {
-			if (PanelDao.supportRoles(panel.id()).stream().anyMatch(eigeneRollen::contains)) {
-				sichtbar.add(panel);
-			}
-		}
-		return sichtbar;
-	}
-
-	private static boolean darfAllesSehen(Guild guild, Member member) {
-		return member.isOwner()
-				|| member.hasPermission(Permission.ADMINISTRATOR)
-				|| member.hasPermission(Permission.MANAGE_SERVER);
+		return Visibility.sichtbarePanels(guild(guildId), discordUserId);
 	}
 
 	private static Guild guild(String guildId) {
@@ -82,15 +54,6 @@ public final class TicketEndpoints {
 			throw new IllegalArgumentException("Unbekannter Server: " + guildId);
 		}
 		return guild;
-	}
-
-	private static Member mitglied(Guild guild, String userId) {
-		try {
-			final Member ausCache = guild.getMemberById(userId);
-			return ausCache != null ? ausCache : guild.retrieveMemberById(userId).complete();
-		} catch (final RuntimeException e) {
-			return null;
-		}
 	}
 
 	private static String guildIdVon(Anfrage anfrage) {
@@ -197,10 +160,7 @@ public final class TicketEndpoints {
 		}
 		final Ticket ticket = maybe.get();
 
-		final boolean darf = sichtbarePanels(ticket.guildId(), anfrage.discordUserId()).stream()
-				.anyMatch(p -> ticket.panelId() != null && p.id() == ticket.panelId())
-				|| ticket.ownerId().equals(anfrage.discordUserId());
-		if (!darf) {
+		if (!Visibility.darfSehen(guild(ticket.guildId()), ticket, anfrage.discordUserId())) {
 			throw new SecurityException("nicht sichtbar");
 		}
 
@@ -273,8 +233,8 @@ public final class TicketEndpoints {
 		// keine Panel-ID. Deshalb wird ueber den Namen gefiltert; was sich nicht
 		// zuordnen laesst, sehen nur Serververwalter.
 		final Guild guild = guild(guildId);
-		final Member member = mitglied(guild, anfrage.discordUserId());
-		final boolean allesSehen = member != null && darfAllesSehen(guild, member);
+		final Member member = Visibility.mitglied(guild, anfrage.discordUserId());
+		final boolean allesSehen = member != null && Visibility.darfAllesSehen(member);
 
 		final List<Object> werte = new ArrayList<>();
 		werte.add(guildId);

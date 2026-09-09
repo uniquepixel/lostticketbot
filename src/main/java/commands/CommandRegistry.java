@@ -125,7 +125,20 @@ public final class CommandRegistry {
 						.addSubcommands(
 								new SubcommandData("vorschau",
 										"Zeigen, was übernommen würde — ändert nichts"),
-								new SubcommandData("ausfuehren", "Übernahme wirklich durchführen")))
+								new SubcommandData("ausfuehren", "Übernahme wirklich durchführen")),
+
+				// Ohne Rechtebeschraenkung: wer welches Transcript bekommt,
+				// entscheidet der Bot anhand der Discord-Rollen, nicht Discord
+				// anhand der Befehlsberechtigung. Ein Bewerber darf sein eigenes
+				// Ticket abrufen.
+				Commands.slash(TranscriptCommand.NAME, "Ticketverlauf als lesbare Datei")
+						.addSubcommands(
+								new SubcommandData("hier", "Verlauf dieses Ticketkanals"),
+								new SubcommandData("holen", "Verlauf zu einer Ticket-ID")
+										.addOption(OptionType.INTEGER, "id", "Ticket-ID", true),
+								new SubcommandData("suchen", "Ticket nach Name oder Nutzer-ID suchen")
+										.addOption(OptionType.STRING, "suche",
+												"Teil des Kanalnamens oder eine Nutzer-ID", true)))
 				.queue(
 						ok -> System.out.println("  Befehle angemeldet für " + guild.getName()),
 						err -> System.err.println("  Befehle für " + guild.getName()
