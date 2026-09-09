@@ -21,6 +21,7 @@ import net.dv8tion.jda.api.entities.channel.concrete.Category;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.managers.channel.concrete.TextChannelManager;
 import net.dv8tion.jda.api.requests.restaction.ChannelAction;
+import transcript.TranscriptArchiver;
 
 /**
  * Lebenszyklus eines Tickets: öffnen, schließen, wieder öffnen.
@@ -276,6 +277,47 @@ public final class TicketService {
 		}
 
 		TicketDao.reopen(ticket.id(), newName);
+	}
+
+	// -----------------------------------------------------------------------
+	// Loeschen
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Loescht den Ticketkanal — nachdem der Verlauf gesichert ist.
+	 *
+	 * Die Reihenfolge ist die ganze Vorsicht dieser Methode:
+	 *
+	 * <ol>
+	 * <li>archivieren, solange der Kanal noch da ist,</li>
+	 * <li>den Kanal loeschen,</li>
+	 * <li>und erst danach die Datenbank umstellen.</li>
+	 * </ol>
+	 *
+	 * Bricht Schritt 2 ab, steht in der Datenbank weiterhin, was es auf dem
+	 * Server wirklich gibt. Umgekehrt waere schlimmer: ein Ticket, das als
+	 * geloescht gilt, aber offen im Server steht und weiter mitschreibt.
+	 *
+	 * Ein noch offenes Ticket wird hier nur in der Datenbank geschlossen. Den
+	 * Kanal umzubenennen und in die Abgelegt-Kategorie zu schieben, um ihn eine
+	 * Sekunde spaeter zu loeschen, waeren zwei Discord-Aufrufe fuer nichts.
+	 */
+	public static void delete(Guild guild, Ticket ticket, Panel panel, String byUserId) {
+		if (panel != null && !TranscriptArchiver.istArchiviert(ticket.id())) {
+			if (ticket.isOpen()) {
+				TicketDao.close(ticket.id(), byUserId, "vor dem Löschen geschlossen",
+						ticket.channelName());
+			}
+			TicketDao.byId(ticket.id()).ifPresent(
+					aktuell -> TranscriptArchiver.archive(guild, aktuell, panel, byUserId));
+		}
+
+		final TextChannel channel = guild.getTextChannelById(ticket.channelId());
+		if (channel != null) {
+			channel.delete().reason("Ticket gelöscht").complete();
+		}
+
+		TicketDao.markDeleted(ticket.id());
 	}
 
 	private static String formatDuration(long seconds) {

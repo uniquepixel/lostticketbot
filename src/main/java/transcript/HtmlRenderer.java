@@ -27,10 +27,26 @@ import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
  * und laufen nach etwa einem Tag ab. Die Bilder selbst sind nicht weg — sie
  * liegen dauerhaft im Storage-Kanal — nur diese eine Datei zeigt sie dann nicht
  * mehr an. Ein neues {@code /transcript} erzeugt frische Links.
+ *
+ * Fuer die Datei, die beim Schliessen dauerhaft im Log-Kanal liegen bleibt,
+ * greift das nicht: die soll niemand neu erzeugen muessen. Dafuer gibt es
+ * {@link #rendern(Ticket, Panel, boolean)} mit eingebetteten Bildern — dieselbe
+ * Loesung wie bei Ticket Tool, nur mit Obergrenze, damit die Datei das
+ * Uploadlimit des Servers nicht sprengt.
  */
 public final class HtmlRenderer {
 
 	private static final DateTimeFormatter ZEIT = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm");
+
+	/**
+	 * Wie viel eingebettetes Bildmaterial die Datei hoechstens tragen darf.
+	 *
+	 * base64 blaeht um rund ein Drittel auf, und der Bewerbungsserver ist
+	 * ungeboostet — dort sind 10 MB je Upload Schluss. 7 MB Rohdaten landen
+	 * also bei gut 9,3 MB Datei und passen noch. Was darueber hinausgeht,
+	 * bleibt verlinkt; das steht dann auch in der Datei.
+	 */
+	private static final long EINBETTUNGSBUDGET = 7L * 1024 * 1024;
 
 	private HtmlRenderer() {
 	}
@@ -47,10 +63,24 @@ public final class HtmlRenderer {
 		}
 	}
 
+	/** Verlinkte Bilder — klein, aber die Adressen laufen nach einem Tag ab. */
 	public static String rendern(Ticket ticket, Panel panel) {
+		return rendern(ticket, panel, false);
+	}
+
+	/**
+	 * @param bilderEinbetten Bilder als {@code data:}-URI in die Datei legen,
+	 *                        damit sie ohne Discord und ohne Datenbank lesbar
+	 *                        bleibt. Fuer die Archivdatei im Log-Kanal.
+	 */
+	public static String rendern(Ticket ticket, Panel panel, boolean bilderEinbetten) {
 		final List<Zeile> zeilen = zeilenLaden(ticket.id());
 		final Map<Long, List<Anhang>> anhaenge = anhaengeLaden(ticket.id());
 		final Map<String, String> frischeUrls = urlsAuffrischen(anhaenge);
+		final Map<String, String> eingebettet = bilderEinbetten
+				? bilderHolen(anhaenge, frischeUrls)
+				: Map.of();
+		boolean allesEingebettet = bilderEinbetten;
 
 		final Map<String, Integer> proAutor = new LinkedHashMap<>();
 		zeilen.forEach(z -> proAutor.merge(z.autorName(), 1, Integer::sum));
@@ -201,14 +231,57 @@ public final class HtmlRenderer {
 					m.getAttachments().stream()
 							.filter(att -> att.getFileName().equals(a.dateiname()))
 							.findFirst()
-							.ifPresent(att -> urls.put(a.storageMessageId() + "/" + a.dateiname(),
-									att.getUrl()));
+							.ifPresent(att -> urls.put(schluessel(a), att.getUrl()));
 				} catch (final RuntimeException e) {
 					System.err.println("Anhang " + a.dateiname() + " nicht abrufbar: " + e.getMessage());
 				}
 			}
 		}
 		return urls;
+	}
+
+	/** Ein Anhang ist eindeutig durch seine Nachricht und seinen Dateinamen. */
+	private static String schluessel(Anhang a) {
+		return a.storageMessageId() + "/" + a.dateiname();
+	}
+
+	/**
+	 * Laedt Bilder herunter und macht {@code data:}-URIs daraus.
+	 *
+	 * Laeuft ueber das Budget, hoert es auf — die restlichen Bilder bleiben
+	 * verlinkt, statt dass der Upload der ganzen Datei am Limit scheitert und
+	 * am Ende gar kein Transcript im Log-Kanal steht.
+	 */
+	private static Map<String, String> bilderHolen(Map<Long, List<Anhang>> anhaenge,
+			Map<String, String> urls) {
+		final Map<String, String> eingebettet = new HashMap<>();
+		long verbraucht = 0;
+
+		for (final List<Anhang> liste : anhaenge.values()) {
+			for (final Anhang a : liste) {
+				if (!a.istBild() || verbraucht + a.groesse() > EINBETTUNGSBUDGET) {
+					continue;
+				}
+				final String url = urls.get(schluessel(a));
+				if (url == null) {
+					continue;
+				}
+				try (var in = java.net.URI.create(url).toURL().openStream()) {
+					final byte[] daten = in.readAllBytes();
+					if (verbraucht + daten.length > EINBETTUNGSBUDGET) {
+						continue;
+					}
+					verbraucht += daten.length;
+					eingebettet.put(schluessel(a), "data:"
+							+ (a.contentType() == null ? "image/png" : a.contentType())
+							+ ";base64,"
+							+ java.util.Base64.getEncoder().encodeToString(daten));
+				} catch (final Exception e) {
+					System.err.println("Bild " + a.dateiname() + " nicht einbettbar: " + e.getMessage());
+				}
+			}
+		}
+		return eingebettet;
 	}
 
 	private static void feld(StringBuilder h, String name, String wert) {

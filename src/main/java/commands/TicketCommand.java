@@ -17,7 +17,12 @@ import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.interactions.commands.OptionMapping;
+import net.dv8tion.jda.api.interactions.components.ActionRow;
+import net.dv8tion.jda.api.interactions.components.buttons.Button;
+import ticket.TicketInteractions;
 import ticket.TicketService;
+import ticket.Visibility;
+import transcript.TranscriptArchiver;
 import util.MessageUtil;
 
 /**
@@ -56,6 +61,7 @@ public class TicketCommand extends ListenerAdapter {
 			case "entfernen" -> removeUser(event, ticket);
 			case "umbenennen" -> rename(event, ticket);
 			case "wiedereroeffnen" -> reopen(event, ticket);
+			case "loeschen" -> delete(event, ticket);
 			case "info" -> info(event, ticket);
 			default -> event.reply("Unbekannter Unterbefehl.").setEphemeral(true).queue();
 		}
@@ -183,6 +189,46 @@ public class TicketCommand extends ListenerAdapter {
 						"Wiedereröffnen fehlgeschlagen: " + e.getMessage())).queue();
 			}
 		}, "ticket-reopen-" + ticket.id()).start());
+	}
+
+	/**
+	 * Fragt nach, bevor geloescht wird. Ausgefuehrt wird in
+	 * {@link ticket.TicketInteractions} — dort haengt schon die Bestaetigung
+	 * fuers Schliessen.
+	 *
+	 * Loeschen ist die einzige Ticketaktion, die nicht jeder im Kanal darf. Der
+	 * Eroeffner sieht sein Ticket, aber er soll es nicht verschwinden lassen
+	 * koennen: gerade bei einer Beschwerde ist die Aufzeichnung das, worauf
+	 * sich die Orga spaeter beruft.
+	 */
+	private void delete(SlashCommandInteractionEvent event, Ticket ticket) {
+		if (!Visibility.darfVerwalten(event.getGuild(), ticket, event.getMember())) {
+			event.replyEmbeds(MessageUtil.error(
+					"Tickets löschen darf nur das Team dieses Bereichs."))
+					.setEphemeral(true).queue();
+			return;
+		}
+
+		final String hinweis = TranscriptArchiver.istArchiviert(ticket.id())
+				? "Der Verlauf ist bereits archiviert und bleibt über `/transcript holen id:"
+						+ ticket.id() + "` abrufbar."
+				: "Der Verlauf wird vorher archiviert und bleibt über `/transcript holen id:"
+						+ ticket.id() + "` abrufbar.";
+
+		event.replyEmbeds(MessageUtil.error(
+				"**" + ticket.channelName() + "** wirklich löschen?
+
+"
+						+ hinweis + "
+
+Der Kanal selbst ist danach weg — das lässt sich nicht "
+						+ "rückgängig machen."))
+				.setEphemeral(true)
+				.setComponents(ActionRow.of(
+						Button.danger(TicketInteractions.DELETE_CONFIRM_PREFIX + ticket.id(),
+								"Ja, löschen"),
+						Button.secondary(TicketInteractions.CLOSE_ABORT, "Abbrechen")))
+				.queue();
 	}
 
 	private void info(SlashCommandInteractionEvent event, Ticket ticket) {

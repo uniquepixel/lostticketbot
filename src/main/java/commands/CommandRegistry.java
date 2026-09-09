@@ -104,6 +104,8 @@ public final class CommandRegistry {
 								new SubcommandData("umbenennen", "Kanal umbenennen")
 										.addOption(OptionType.STRING, "name", "Neuer Name", true),
 								new SubcommandData("wiedereroeffnen", "Geschlossenes Ticket wieder öffnen"),
+							new SubcommandData("loeschen",
+									"Kanal endgültig löschen — der Verlauf bleibt abrufbar"),
 								new SubcommandData("info", "Details zu diesem Ticket")),
 
 				Commands.slash(ConfigCommand.NAME, "Serverweite Einstellungen und Sperrliste")

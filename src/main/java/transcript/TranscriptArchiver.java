@@ -38,6 +38,18 @@ public final class TranscriptArchiver {
 			String content, String sentAt, String editedAt, String deletedAt) {
 	}
 
+	/**
+	 * Liegt fuer dieses Ticket schon ein Archiv-Post im Storage-Kanal?
+	 *
+	 * Gebraucht beim Loeschen: ein zweites Archivieren wuerde einen zweiten
+	 * Log-Eintrag schreiben und im Kanal so aussehen, als waere das Ticket
+	 * zweimal geschlossen worden.
+	 */
+	public static boolean istArchiviert(long ticketId) {
+		return Database.count("SELECT COUNT(*) FROM transcript_archives WHERE ticket_id = ?",
+				ticketId) > 0;
+	}
+
 	public static void archive(Guild guild, Ticket ticket, Panel panel, String closedBy) {
 		final List<Row> rows = loadRows(ticket.id());
 		final Map<String, Integer> perAuthor = countPerAuthor(rows);
@@ -209,6 +221,35 @@ public final class TranscriptArchiver {
 				? "nicht archiviert — kein Storage-Kanal"
 				: "Archiv: " + archiveMessageId);
 
-		log.sendMessageEmbeds(embed.build()).queue();
+		// Die lesbare Datei haengt am Log-Eintrag, so wie es Ticket Tool
+		// gemacht hat. Die Orga oeffnet den Log-Kanal und klickt die Datei an —
+		// diese Gewohnheit soll die Umstellung nicht kosten. Bilder stecken
+		// darin, damit die Datei auch in einem Jahr noch vollstaendig ist.
+		final byte[] html = htmlErzeugen(ticket, panel);
+		if (html == null) {
+			log.sendMessageEmbeds(embed.build()).queue();
+			return;
+		}
+		log.sendMessageEmbeds(embed.build())
+				.addFiles(FileUpload.fromData(html, "transcript-" + ticket.channelName() + ".html"))
+				.queue(ok -> {
+				}, err -> {
+					// Meist das Uploadlimit. Der Log-Eintrag selbst ist
+					// wichtiger als die Datei, also lieber ohne als gar nicht.
+					System.err.println("Transcript-Datei für " + ticket.channelName()
+							+ " konnte nicht angehängt werden: " + err.getMessage());
+					log.sendMessageEmbeds(embed.build()).queue();
+				});
+	}
+
+	private static byte[] htmlErzeugen(Ticket ticket, Panel panel) {
+		try {
+			return HtmlRenderer.rendern(ticket, panel, true)
+					.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+		} catch (final RuntimeException e) {
+			System.err.println("Transcript-HTML für " + ticket.channelName()
+					+ " fehlgeschlagen: " + e);
+			return null;
+		}
 	}
 }

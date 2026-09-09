@@ -192,6 +192,45 @@ class DiscordEndToEndTest {
 	}
 
 	@Test
+	@Order(5)
+	@DisplayName("Loeschen entfernt den Kanal, das Ticket bleibt als Datensatz erhalten")
+	void loeschen() {
+		final Panel panel = PanelDao.byId(panelId).orElseThrow();
+		final Ticket ticket = TicketDao.byChannel(kanalId).orElseThrow();
+
+		TicketService.delete(guild, ticket, panel, guild.getSelfMember().getId());
+
+		assertTrue(kanalIstWeg(kanalId), "Der Kanal steht noch auf dem Server");
+
+		// Entscheidend: die Zeile bleibt. Ein geloeschtes Ticket ist nicht
+		// vergessen — Nummer, Eroeffner und Verlauf sind weiter abrufbar,
+		// gerade weil der Kanal weg ist.
+		final Ticket nachher = TicketDao.byId(ticket.id()).orElseThrow(
+				() -> new AssertionError("Der Datensatz wurde mitgeloescht"));
+		assertEquals(Ticket.Status.DELETED, nachher.status());
+		assertEquals(ticket.number(), nachher.number());
+		assertEquals(ticket.ownerId(), nachher.ownerId());
+
+		kanalId = null;   // tearDown muss ihn nicht mehr aufraeumen
+	}
+
+	/** Discord bestaetigt das Loeschen, der Cache zieht ueber das Gateway nach. */
+	private boolean kanalIstWeg(String id) {
+		for (int versuch = 0; versuch < 20; versuch++) {
+			if (guild.getTextChannelById(id) == null) {
+				return true;
+			}
+			try {
+				Thread.sleep(250);
+			} catch (final InterruptedException e) {
+				Thread.currentThread().interrupt();
+				return false;
+			}
+		}
+		return false;
+	}
+
+	@Test
 	@Order(4)
 	@DisplayName("Nach dem Schliessen ist wieder ein Ticket moeglich")
 	void nachSchliessenWiederMoeglich() {

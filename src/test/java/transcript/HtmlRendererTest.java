@@ -156,6 +156,25 @@ class HtmlRendererTest {
 	}
 
 	@Test
+	@DisplayName("Eingebettete Fassung sagt ehrlich, wenn ein Bild nicht hineinpasste")
+	void einbettungOhneErreichbaresBild() {
+		// Ohne laufendes JDA laesst sich keine frische Adresse holen, also kann
+		// auch nichts eingebettet werden. Genau dieser Fall darf die Datei nicht
+		// zerreissen und muss im Fusstext stehen — sonst haelt jemand eine
+		// unvollstaendige Archivdatei fuer vollstaendig.
+		final Ticket t = TicketDao.byId(ticketId).orElseThrow();
+		final Panel p = PanelDao.byId(panelId).orElseThrow();
+		final String h = HtmlRenderer.rendern(t, p, true);
+
+		assertTrue(h.startsWith("<!doctype html>"));
+		assertTrue(h.contains("</html>"), "Dokument nicht geschlossen");
+		assertTrue(h.contains("dorf.png"), "Der Anhang muss trotzdem auftauchen");
+		assertFalse(h.contains("stecken in dieser Datei — sie bleibt für sich allein lesbar"),
+				"Darf sich nicht als vollständig ausgeben");
+		assertTrue(h.contains("Link nicht abrufbar"), "Der fehlende Anhang muss benannt sein");
+	}
+
+	@Test
 	@DisplayName("Die Datei bleibt klein — das ist der Unterschied zu Ticket Tool")
 	void bleibtKlein() {
 		// Ticket Tool bettet Bilder als base64 ein und kommt so auf Dateien bis

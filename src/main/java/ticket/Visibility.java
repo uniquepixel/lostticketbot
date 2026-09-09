@@ -70,6 +70,30 @@ public final class Visibility {
 				.anyMatch(p -> p.id() == ticket.panelId());
 	}
 
+	/**
+	 * Darf dieses Mitglied das Ticket verwalten — also schliessen, wieder
+	 * oeffnen, loeschen?
+	 *
+	 * Bewusst NICHT dieselbe Regel wie {@link #darfSehen}: der Eroeffner darf
+	 * sein Ticket lesen, aber nicht loeschen. Sonst koennte ein abgelehnter
+	 * Bewerber die Aufzeichnung seines eigenen Verhaltens verschwinden lassen,
+	 * und genau die will die Orga im Zweifel nachlesen koennen.
+	 */
+	public static boolean darfVerwalten(Guild guild, Ticket ticket, Member member) {
+		if (member == null) {
+			return false;
+		}
+		if (darfAllesSehen(member) || member.hasPermission(Permission.MANAGE_CHANNEL)) {
+			return true;
+		}
+		if (ticket.panelId() == null) {
+			return false;
+		}
+		final Set<String> eigeneRollen = new HashSet<>();
+		member.getRoles().forEach(r -> eigeneRollen.add(r.getId()));
+		return PanelDao.supportRoles(ticket.panelId()).stream().anyMatch(eigeneRollen::contains);
+	}
+
 	public static boolean darfAllesSehen(Member member) {
 		return member.isOwner()
 				|| member.hasPermission(Permission.ADMINISTRATOR)

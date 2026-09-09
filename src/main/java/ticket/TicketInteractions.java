@@ -41,6 +41,7 @@ public class TicketInteractions extends ListenerAdapter {
 	public static final String CLOSE_PREFIX = "tb:close:";
 	public static final String CLOSE_CONFIRM_PREFIX = "tb:close-confirm:";
 	public static final String CLOSE_ABORT = "tb:close-abort";
+	public static final String DELETE_CONFIRM_PREFIX = "tb:delete-confirm:";
 
 	@Override
 	public void onButtonInteraction(@Nonnull ButtonInteractionEvent event) {
@@ -48,6 +49,8 @@ public class TicketInteractions extends ListenerAdapter {
 
 		if (id.startsWith(MenuRenderer.OPEN_PREFIX)) {
 			handleOpen(event, parseId(id, MenuRenderer.OPEN_PREFIX));
+		} else if (id.startsWith(DELETE_CONFIRM_PREFIX)) {
+			handleDeleteConfirmed(event, parseId(id, DELETE_CONFIRM_PREFIX));
 		} else if (id.startsWith(CLOSE_CONFIRM_PREFIX)) {
 			handleCloseConfirmed(event, parseId(id, CLOSE_CONFIRM_PREFIX));
 		} else if (id.startsWith(CLOSE_PREFIX)) {
@@ -244,6 +247,60 @@ public class TicketInteractions extends ListenerAdapter {
 						.setComponents(List.of()).queue();
 			}
 		}, "ticket-close-" + ticketId).start());
+	}
+
+	// -----------------------------------------------------------------------
+	// Loeschen
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Fuehrt das Loeschen aus, nachdem im Befehl nachgefragt wurde.
+	 *
+	 * Die Antwort geht raus, BEVOR der Kanal faellt: sie haengt an genau diesem
+	 * Kanal und laesst sich danach nicht mehr bearbeiten.
+	 */
+	private void handleDeleteConfirmed(ButtonInteractionEvent event, long ticketId) {
+		final Guild guild = event.getGuild();
+		final Member member = event.getMember();
+		if (guild == null || member == null) {
+			return;
+		}
+
+		event.deferEdit().queue(hook -> new Thread(() -> {
+			final Optional<Ticket> maybeTicket = TicketDao.byId(ticketId);
+			if (maybeTicket.isEmpty()) {
+				event.getHook().editOriginal("Dieses Ticket gibt es nicht mehr.")
+						.setComponents(List.of()).queue();
+				return;
+			}
+			final Ticket ticket = maybeTicket.get();
+
+			// Zweite Pruefung: die Frage sah nur der Aufrufer, aber zwischen
+			// Frage und Klick kann sich seine Rolle geaendert haben.
+			if (!Visibility.darfVerwalten(guild, ticket, member)) {
+				event.getHook().editOriginal("Dafür fehlt dir die Berechtigung.")
+						.setComponents(List.of()).queue();
+				return;
+			}
+
+			final Panel panel = ticket.panelId() == null
+					? null
+					: PanelDao.byId(ticket.panelId()).orElse(null);
+
+			try {
+				event.getHook().editOriginal("Verlauf wird gesichert, dann fällt der Kanal.")
+						.setComponents(List.of()).complete();
+				TicketService.delete(guild, ticket, panel, member.getId());
+				System.out.println("Ticket " + ticket.channelName() + " gelöscht von "
+						+ member.getUser().getName());
+			} catch (final RuntimeException e) {
+				System.err.println("Ticket " + ticketId + " konnte nicht gelöscht werden: " + e);
+				event.getHook().editOriginal("Das Löschen ist fehlgeschlagen: " + e.getMessage())
+						.setComponents(List.of()).queue(ok -> {
+						}, err -> {
+						});
+			}
+		}, "ticket-delete-" + ticketId).start());
 	}
 
 	private static long parseId(String componentId, String prefix) {
