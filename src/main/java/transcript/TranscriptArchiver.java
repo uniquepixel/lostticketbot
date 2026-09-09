@@ -52,6 +52,18 @@ public final class TranscriptArchiver {
 		}
 
 		postLog(guild, ticket, panel, closedBy, rows.size(), perAuthor, archiveMessageId);
+
+		if (panel.dmOnClose()) {
+			// retrieveUserById statt Member: wer den Server verlassen hat, ist
+			// kein Mitglied mehr - und gerade dann wird oft geschlossen.
+			guild.getJDA().retrieveUserById(ticket.ownerId()).queue(
+					user -> util.Dm.send(user, util.MessageUtil.embed("Ticket geschlossen",
+							"Dein Ticket **" + ticket.channelName() + "** auf **" + guild.getName()
+									+ "** wurde geschlossen.",
+							0x1ec45c)),
+					err -> System.out.println("Schliess-DM: Nutzer " + ticket.ownerId()
+							+ " nicht gefunden."));
+		}
 	}
 
 	private static TextChannel storageChannel() {

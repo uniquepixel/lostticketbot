@@ -104,7 +104,21 @@ public final class CommandRegistry {
 								new SubcommandData("umbenennen", "Kanal umbenennen")
 										.addOption(OptionType.STRING, "name", "Neuer Name", true),
 								new SubcommandData("wiedereroeffnen", "Geschlossenes Ticket wieder öffnen"),
-								new SubcommandData("info", "Details zu diesem Ticket")))
+								new SubcommandData("info", "Details zu diesem Ticket")),
+
+				Commands.slash(ConfigCommand.NAME, "Serverweite Einstellungen und Sperrliste")
+						.setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
+						.addSubcommands(
+								new SubcommandData("zeigen", "Aktuelle Einstellungen"),
+								new SubcommandData("limit", "Serverweites Limit offener Tickets pro Person")
+										.addOption(OptionType.INTEGER, "anzahl",
+												"0 = unbegrenzt", true),
+								new SubcommandData("sperren", "Person oder Rolle vom Öffnen ausschließen")
+										.addOption(OptionType.MENTIONABLE, "wen", "Wer", true)
+										.addOption(OptionType.STRING, "grund", "Warum"),
+								new SubcommandData("entsperren", "Sperre aufheben")
+										.addOption(OptionType.MENTIONABLE, "wen", "Wer", true),
+								new SubcommandData("sperrliste", "Wer ist gesperrt")))
 				.queue(
 						ok -> System.out.println("  Befehle angemeldet für " + guild.getName()),
 						err -> System.err.println("  Befehle für " + guild.getName()

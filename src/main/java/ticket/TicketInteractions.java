@@ -25,6 +25,7 @@ import net.dv8tion.jda.api.interactions.components.buttons.Button;
 import net.dv8tion.jda.api.utils.messages.MessageCreateBuilder;
 import panel.MenuRenderer;
 import transcript.TranscriptArchiver;
+import util.Dm;
 import util.MessageUtil;
 
 /**
@@ -115,6 +116,13 @@ public class TicketInteractions extends ListenerAdapter {
 			}
 
 			postWelcome(result.channel(), panel, member);
+
+			if (panel.dmOnOpen()) {
+				Dm.send(member.getUser(), MessageUtil.embed("Ticket geöffnet",
+						"Dein Ticket **" + result.channel().getName() + "** auf **"
+								+ guild.getName() + "** ist offen. Wir melden uns dort.",
+						GuildConfigDao.get(guild.getId()).ticketEmbedColor()));
+			}
 			event.getHook().editOriginalEmbeds(MessageUtil.embed(null,
 					"Dein Ticket wurde geoeffnet: " + result.channel().getAsMention(),
 					GuildConfigDao.get(guild.getId()).ticketEmbedColor())).queue();

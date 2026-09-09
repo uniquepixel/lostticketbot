@@ -7,6 +7,7 @@ import javax.annotation.Nonnull;
 import db.Database;
 import db.GuildConfigDao;
 import commands.CommandRegistry;
+import commands.ConfigCommand;
 import commands.LegacyCommand;
 import commands.MenuCommand;
 import commands.PanelCommand;
@@ -72,7 +73,7 @@ public class Bot extends ListenerAdapter {
 				.setChunkingFilter(ChunkingFilter.ALL)
 				.setActivity(Activity.listening("eure Anliegen"))
 				.addEventListeners(new Bot(), new TicketInteractions(), new TranscriptRecorder(),
-						new PanelCommand(), new MenuCommand(), new LegacyCommand(), new TicketCommand())
+						new PanelCommand(), new MenuCommand(), new LegacyCommand(), new TicketCommand(), new ConfigCommand())
 				.build();
 
 		Runtime.getRuntime().addShutdownHook(new Thread(Database::shutdown, "db-shutdown"));
