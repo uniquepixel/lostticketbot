@@ -118,7 +118,14 @@ public final class CommandRegistry {
 										.addOption(OptionType.STRING, "grund", "Warum"),
 								new SubcommandData("entsperren", "Sperre aufheben")
 										.addOption(OptionType.MENTIONABLE, "wen", "Wer", true),
-								new SubcommandData("sperrliste", "Wer ist gesperrt")))
+								new SubcommandData("sperrliste", "Wer ist gesperrt")),
+
+				Commands.slash(AdoptCommand.NAME, "Offene Ticket-Tool-Tickets übernehmen")
+						.setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
+						.addSubcommands(
+								new SubcommandData("vorschau",
+										"Zeigen, was übernommen würde — ändert nichts"),
+								new SubcommandData("ausfuehren", "Übernahme wirklich durchführen")))
 				.queue(
 						ok -> System.out.println("  Befehle angemeldet für " + guild.getName()),
 						err -> System.err.println("  Befehle für " + guild.getName()
