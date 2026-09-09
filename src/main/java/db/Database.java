@@ -128,6 +128,23 @@ public final class Database {
 		}
 	}
 
+	/**
+	 * Wie {@link #insert}, aber vertraeglich mit {@code ON CONFLICT DO NOTHING}:
+	 * wurde nichts eingefuegt, kommt 0 zurueck statt einer Ausnahme.
+	 */
+	public static long insertIgnoringConflict(String sql, Object... params) {
+		try (Connection conn = getConnection();
+				PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+			bind(ps, params);
+			ps.executeUpdate();
+			try (ResultSet keys = ps.getGeneratedKeys()) {
+				return keys.next() ? keys.getLong(1) : 0L;
+			}
+		} catch (final SQLException e) {
+			throw new DatabaseException("Insert fehlgeschlagen: " + sql, e);
+		}
+	}
+
 	public static <T> List<T> query(String sql, RowMapper<T> mapper, Object... params) {
 		final List<T> out = new ArrayList<>();
 		try (Connection conn = getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {

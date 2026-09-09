@@ -23,6 +23,7 @@ import net.dv8tion.jda.api.utils.ChunkingFilter;
 import net.dv8tion.jda.api.utils.MemberCachePolicy;
 import ticket.TicketInteractions;
 import ticket.TicketService;
+import transcript.TranscriptRecorder;
 
 /**
  * Einstiegspunkt des LOST Ticket-Bots.
@@ -61,7 +62,7 @@ public class Bot extends ListenerAdapter {
 				.setMemberCachePolicy(MemberCachePolicy.ALL)
 				.setChunkingFilter(ChunkingFilter.ALL)
 				.setActivity(Activity.listening("eure Anliegen"))
-				.addEventListeners(new Bot(), new TicketInteractions())
+				.addEventListeners(new Bot(), new TicketInteractions(), new TranscriptRecorder())
 				.build();
 
 		Runtime.getRuntime().addShutdownHook(new Thread(Database::shutdown, "db-shutdown"));
