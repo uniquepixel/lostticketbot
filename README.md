@@ -148,6 +148,22 @@ SSH-Tunnel zur Datenbank und Umgebungsvariablen, die nirgends aufgeschrieben war
 Zugeklappter Deckel hieß: kein Ticketsystem auf beiden Discords, und niemand außer
 dem Startenden wusste, wie man es wieder hochbekommt.
 
+## Täglicher Blick
+
+```bash
+./check.sh
+```
+
+Liest nur, ändert nichts: Dienstzustand, Fehler der letzten 24 Stunden, Erreichbarkeit
+der API, Tickets je Server, was seit über sieben Tagen unbeansprucht liegt,
+Archiv-Rückstand, Kanäle die es nicht mehr gibt, Plattenplatz und ob Ticket Tool als
+Rückweg noch installiert ist.
+
+Aufgeschrieben statt jedes Mal neu zusammengesucht — sonst prüft man an verschiedenen
+Tagen verschiedene Dinge und merkt nicht, was fehlt. Der erste Lauf am 10.09.2026 hat
+sofort zwei Dinge gefunden: einen Fehler beim Schließen verwaister Tickets und zwei
+Ticketkanäle, die von Hand gelöscht worden waren, ohne dass die Datenbank davon wusste.
+
 ## Logs
 
 Der Dienst schreibt nach journald **und** in `💻┋ticket-bot-log` auf LOST Family, neben

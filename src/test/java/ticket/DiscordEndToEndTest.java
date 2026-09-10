@@ -332,6 +332,40 @@ class DiscordEndToEndTest {
 	}
 
 	@Test
+	@Order(7)
+	@DisplayName("Ein Ticket laesst sich schliessen, auch wenn der Eroeffner weg ist")
+	void eroeffnerWeg() {
+		// Der Fall aus dem Betrieb (10.09.2026): "10007 Unknown Member" liess
+		// das Schliessen scheitern — und zwar genau dann, wenn ein Bewerber den
+		// Server verlassen hatte. Also ausgerechnet in dem Fall, fuer den es
+		// das automatische Schliessen gibt.
+		final Panel panel = PanelDao.byId(panelId).orElseThrow();
+
+		final TextChannel kanal = guild.createTextChannel("e2e-weg")
+				.setParent(kategorie).complete();
+		// Eine ID, hinter der garantiert niemand auf diesem Server steht.
+		final long id = TicketDao.create(guild.getId(), panelId, 999, kanal.getId(),
+				kanal.getName(), "1");
+		final Ticket verwaist = TicketDao.byId(id).orElseThrow();
+
+		try {
+			TicketService.close(guild, verwaist, panel, null, "Eröffner hat den Server verlassen");
+
+			final Ticket zu = TicketDao.byId(id).orElseThrow();
+			assertFalse(zu.isOpen(), "Das Ticket muss trotzdem geschlossen sein");
+			assertEquals("e2e-closed-0999", zu.channelName());
+			assertEquals("e2e-closed-0999", guild.getTextChannelById(kanal.getId()).getName(),
+					"Auch der Kanal muss umbenannt worden sein");
+		} finally {
+			final TextChannel aufraeumen = guild.getTextChannelById(kanal.getId());
+			if (aufraeumen != null) {
+				aufraeumen.delete().complete();
+			}
+			Database.update("DELETE FROM tickets WHERE id = ?", id);
+		}
+	}
+
+	@Test
 	@Order(6)
 	@DisplayName("Nach dem Schliessen ist wieder ein Ticket moeglich")
 	void nachSchliessenWiederMoeglich() {

@@ -248,11 +248,20 @@ public final class TicketService {
 
 			// Der Eröffner verliert das Schreibrecht, behält aber Lesezugriff —
 			// er soll nachlesen können, was besprochen wurde.
-			channel.upsertPermissionOverride(guild.retrieveMemberById(ticket.ownerId()).complete())
-					.grant(Permission.VIEW_CHANNEL, Permission.MESSAGE_HISTORY)
-					.deny(Permission.MESSAGE_SEND)
-					.reason("Ticket geschlossen")
-					.complete();
+			//
+			// Ist er nicht mehr auf dem Server, entfällt der Schritt: eine
+			// Berechtigung für jemanden, der weg ist, hat keine Wirkung. Vorher
+			// scheiterte hier das ganze Schließen mit "10007 Unknown Member" —
+			// und ausgerechnet beim automatischen Schließen wegen Weggangs war
+			// das der Normalfall.
+			final Member eroeffner = mitgliedOderNull(guild, ticket.ownerId());
+			if (eroeffner != null) {
+				channel.upsertPermissionOverride(eroeffner)
+						.grant(Permission.VIEW_CHANNEL, Permission.MESSAGE_HISTORY)
+						.deny(Permission.MESSAGE_SEND)
+						.reason("Ticket geschlossen")
+						.complete();
+			}
 		}
 
 		TicketDao.close(ticket.id(), closedBy, reason, newName);
@@ -270,10 +279,13 @@ public final class TicketService {
 			}
 			manager.reason("Ticket wieder geöffnet").complete();
 
-			channel.upsertPermissionOverride(guild.retrieveMemberById(ticket.ownerId()).complete())
-					.grant(TICKET_ACCESS)
-					.reason("Ticket wieder geöffnet")
-					.complete();
+			final Member eroeffner = mitgliedOderNull(guild, ticket.ownerId());
+			if (eroeffner != null) {
+				channel.upsertPermissionOverride(eroeffner)
+						.grant(TICKET_ACCESS)
+						.reason("Ticket wieder geöffnet")
+						.complete();
+			}
 		}
 
 		TicketDao.reopen(ticket.id(), newName);
@@ -321,6 +333,28 @@ public final class TicketService {
 		}
 
 		TicketDao.markDeleted(ticket.id());
+	}
+
+	/**
+	 * Das Mitglied zur ID, oder {@code null}, wenn es den Server verlassen hat.
+	 *
+	 * Ein Weggang darf keine Ticketaktion scheitern lassen. Genau dafuer gibt
+	 * es das automatische Schliessen bei Weggang — es waere absurd, wenn
+	 * ausgerechnet das daran zerbricht.
+	 */
+	static Member mitgliedOderNull(Guild guild, String userId) {
+		if (userId == null) {
+			return null;
+		}
+		final Member ausCache = guild.getMemberById(userId);
+		if (ausCache != null) {
+			return ausCache;
+		}
+		try {
+			return guild.retrieveMemberById(userId).complete();
+		} catch (final RuntimeException e) {
+			return null;
+		}
 	}
 
 	private static String formatDuration(long seconds) {
