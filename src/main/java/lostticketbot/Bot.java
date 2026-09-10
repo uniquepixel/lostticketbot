@@ -38,6 +38,7 @@ import ticket.TicketInteractions;
 import ticket.TicketService;
 import transcript.TranscriptArchiver;
 import transcript.TranscriptRecorder;
+import util.DiscordLog;
 
 /**
  * Einstiegspunkt des LOST Ticket-Bots.
@@ -56,6 +57,11 @@ public class Bot extends ListenerAdapter {
 	private static TicketApiServer apiServer;
 
 	public static void main(String[] args) {
+		// Ganz zuerst: sonst fehlen dem Kanal genau die Startmeldungen, wegen
+		// derer man nach einem Neustart hineinschaut. Bis JDA bereit ist,
+		// puffert der Spiegel.
+		DiscordLog.setup(System.getenv("TICKETBOT_LOG_CHANNEL_ID"));
+
 		final String token = required("TICKETBOT_TOKEN");
 		final String dbUrl = required("TICKETBOT_DB_URL");
 		final String dbUser = required("TICKETBOT_DB_USER");
@@ -130,6 +136,11 @@ public class Bot extends ListenerAdapter {
 
 	@Override
 	public void onReady(@Nonnull ReadyEvent event) {
+		// Erst hier, nicht direkt nach build(): build() kehrt sofort zurueck,
+		// der Kanalcache fuellt sich aber erst mit READY. Wer vorher sendet,
+		// findet seinen Log-Kanal nicht.
+		DiscordLog.setJda(event.getJDA());
+
 		System.out.println("LOST Ticket-Bot " + VERSION + " ist bereit.");
 		for (final Guild guild : event.getJDA().getGuilds()) {
 			GuildConfigDao.ensure(guild.getId());

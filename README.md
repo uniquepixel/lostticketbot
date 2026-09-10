@@ -148,6 +148,21 @@ SSH-Tunnel zur Datenbank und Umgebungsvariablen, die nirgends aufgeschrieben war
 Zugeklappter Deckel hieß: kein Ticketsystem auf beiden Discords, und niemand außer
 dem Startenden wusste, wie man es wieder hochbekommt.
 
+## Logs
+
+Der Dienst schreibt nach journald **und** in `💻┋ticket-bot-log` auf LOST Family, neben
+die Log-Kanäle der anderen LOST-Bots. Discord ist im Alltag einfach schneller zur Hand.
+
+```bash
+ssh jonas@192.168.178.67 'journalctl --user -u lostticketbot -f'
+```
+
+Der Spiegel hängt an `TICKETBOT_LOG_CHANNEL_ID`; ohne die Variable passiert nichts.
+Zwei Dinge sind dabei bewusst anders als beim lostmanager: es werden **ganze Zeilen**
+gepuffert statt einzelner Bytes — sonst zerfällt jeder Umlaut, weil er in UTF-8 aus
+zwei Bytes besteht — und die Warteschlange ist **begrenzt**, damit ein Log-Sturm nicht
+den Arbeitsspeicher frisst. Ein Log ist Beiwerk; der Bot ist es nicht.
+
 ## Dashboard-API
 
 Mit gesetztem `TICKETBOT_API_PORT` bietet der Bot eine REST-Schnittstelle für die
