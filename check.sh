@@ -17,7 +17,22 @@ TICKET_TOOL="557628352828014614"
 
 cd "$(dirname "$0")"
 
-sshx() { ssh -o BatchMode=yes -o ConnectTimeout=10 -i "${SSH_KEY}" "${HOMESERVER}" "$@" 2>/dev/null; }
+# Laeuft der Bericht auf dem Homeserver selbst, faellt SSH weg — dort gibt es
+# keinen Schluessel auf die eigene Maschine, und er waere auch unsinnig. Erkannt
+# wird das an der Zugangsdatei des Bots, die nur dort liegt.
+if [ -f "${HOME}/.config/lostticketbot/bot.env" ]; then
+    AUF_DEM_SERVER=1
+else
+    AUF_DEM_SERVER=0
+fi
+
+sshx() {
+    if [ "${AUF_DEM_SERVER}" = "1" ]; then
+        bash -c "$1" 2>/dev/null
+    else
+        ssh -o BatchMode=yes -o ConnectTimeout=10 -i "${SSH_KEY}" "${HOMESERVER}" "$1" 2>/dev/null
+    fi
+}
 
 # Fuehrt SQL auf dem Homeserver aus. Zugangsdaten bleiben dort.
 sql() {
@@ -150,8 +165,15 @@ fi
 # wartender Bewerber auf, den es nicht mehr gibt. Am 10.09.2026 waren es zwei.
 # ---------------------------------------------------------------------------
 titel "Kanäle, die es nicht mehr gibt"
-if [ -f .token ]; then
+TK=""
+if [ "${AUF_DEM_SERVER}" = "1" ]; then
+    # Auf dem Server steht der Token in der Zugangsdatei, nicht in .token.
+    TK=$(sed -n 's/^TICKETBOT_TOKEN=//p' "${HOME}/.config/lostticketbot/bot.env")
+elif [ -f .token ]; then
     TK=$(tr -d '\r\n' < .token)
+fi
+
+if [ -n "${TK}" ]; then
     GEFUNDEN=0
     LEICHEN=$(sql "SELECT id, channel_id, channel_name, status FROM tickets WHERE status <> 'deleted' AND guild_id <> '1283191994767642715' ORDER BY id")
     while IFS="|" read -r tid kanal name status; do
@@ -165,7 +187,7 @@ if [ -f .token ]; then
     done <<< "${LEICHEN}"
     [ "${GEFUNDEN}" = "0" ] && echo "  keine"
 else
-    echo "  übersprungen (keine .token)"
+    echo "  übersprungen (kein Bot-Token gefunden)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -175,8 +197,7 @@ titel "Umfeld"
 PLATTE=$(sshx "df -h / | tail -1 | awk '{print \$4\" frei von \"\$2}'")
 printf '  Platte       %s\n' "${PLATTE:-unbekannt}"
 
-if [ -f .token ]; then
-    TK=$(tr -d '\r\n' < .token)
+if [ -n "${TK}" ]; then
     for GUILD in 733857906117574717 1108449987827876022; do
         DA=$(curl -s -m 10 -H "Authorization: Bot ${TK}" \
             "https://discord.com/api/v10/guilds/${GUILD}/members/${TICKET_TOOL}" \
