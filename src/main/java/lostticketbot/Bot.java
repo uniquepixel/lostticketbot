@@ -35,6 +35,7 @@ import net.dv8tion.jda.api.utils.MemberCachePolicy;
 import net.dv8tion.jda.api.utils.messages.MessageRequest;
 import panel.MenuRenderer;
 import ticket.TicketInteractions;
+import ticket.TicketKanalWaechter;
 import ticket.TicketService;
 import transcript.TranscriptArchiver;
 import transcript.TranscriptRecorder;
@@ -109,7 +110,12 @@ public class Bot extends ListenerAdapter {
 				.setMemberCachePolicy(MemberCachePolicy.ALL)
 				.setChunkingFilter(ChunkingFilter.ALL)
 				.setActivity(Activity.listening("eure Anliegen"))
+				// TicketKanalWaechter hoert auf ChannelDeleteEvent: wird ein
+				// Ticketkanal von Hand in Discord geloescht, rettet er den
+				// Verlauf ins Archiv und stellt den Status um. Ohne ihn stand
+				// das Ticket weiter als offen in der Datenbank.
 				.addEventListeners(new Bot(), new TicketInteractions(), new TranscriptRecorder(),
+						new TicketKanalWaechter(),
 						new PanelCommand(), new MenuCommand(), new LegacyCommand(), new TicketCommand(), new ConfigCommand(), new AdoptCommand(), new TranscriptCommand())
 				.build();
 

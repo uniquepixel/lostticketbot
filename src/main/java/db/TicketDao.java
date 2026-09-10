@@ -50,6 +50,17 @@ public final class TicketDao {
 				Ticket::from, guildId, ownerId);
 	}
 
+	/**
+	 * Alles, was laut Datenbank noch als Kanal auf dem Server steht.
+	 *
+	 * Grundlage fuer den Abgleich beim Start in TicketKanalWaechter: geschlossen
+	 * heisst nicht weg — der Kanal bleibt stehen, bis jemand ihn loescht.
+	 */
+	public static List<Ticket> nichtGeloescht(String guildId) {
+		return Database.query(SELECT + "WHERE guild_id = ? AND status <> 'deleted' ORDER BY id",
+				Ticket::from, guildId);
+	}
+
 	public static List<Ticket> allOpen(String guildId) {
 		return Database.query(SELECT + "WHERE guild_id = ? AND status = 'open' ORDER BY opened_at",
 				Ticket::from, guildId);

@@ -40,7 +40,11 @@ public final class TranscriptArchiver {
 
 	/** Warum archiviert wird — das aendert den Log-Eintrag und die DM. */
 	public enum Anlass {
-		GESCHLOSSEN, GELOESCHT
+		GESCHLOSSEN,
+		/** Ueber den Loeschknopf: der Bot loescht den Kanal gleich selbst. */
+		GELOESCHT,
+		/** Der Kanal war schon weg, als es dem Bot auffiel — von Hand entfernt. */
+		KANAL_ENTFERNT
 	}
 
 	/** Liegt fuer dieses Ticket schon ein Archiv-Post im Storage-Kanal? */
@@ -80,6 +84,19 @@ public final class TranscriptArchiver {
 		archive(guild, ticket, panel, byUserId, Anlass.GELOESCHT);
 	}
 
+	/**
+	 * Sichert den Verlauf, nachdem der Kanal schon gefallen ist.
+	 *
+	 * Der Fall aus dem Betrieb: jemand loescht den Ticketkanal von Hand in
+	 * Discord. Zu retten ist dann nur noch, was in der Datenbank steht — genau
+	 * deshalb wird laufend mitgeschrieben und nicht erst beim Schliessen aus der
+	 * Kanalhistorie geholt.
+	 */
+	public static void archiviereNachKanalLoeschung(Guild guild, Ticket ticket, Panel panel,
+			String byUserId) {
+		archive(guild, ticket, panel, byUserId, Anlass.KANAL_ENTFERNT);
+	}
+
 	public static void archive(Guild guild, Ticket ticket, Panel panel, String closedBy) {
 		archive(guild, ticket, panel, closedBy, Anlass.GESCHLOSSEN);
 	}
@@ -89,17 +106,25 @@ public final class TranscriptArchiver {
 		final List<Row> rows = loadRows(ticket.id());
 		final Map<String, Integer> perAuthor = countPerAuthor(rows);
 
+		// Ein von Hand geloeschter Kanal, in dem nie ein Mensch etwas geschrieben
+		// hat, ist nichts, was man retten muesste: die uebernommenen Alt-Tickets
+		// haben bei uns nie Verlauf aufgezeichnet, ihr Inhalt liegt in den
+		// Ticket-Tool-Transcripts. Ein leerer Archiv-Post waere nur Rauschen im
+		// Storage-Kanal — der Log-Eintrag darunter kommt trotzdem.
+		final boolean nichtsAufgezeichnet = anlass == Anlass.KANAL_ENTFERNT
+				&& rows.stream().allMatch(Row::bot);
+
 		// Beim Loeschen nur neu schreiben, wenn das vorhandene Archiv fehlt oder
 		// Luecken hat. Sonst bliebe der alte Post als Leiche im Storage-Kanal
 		// zurueck, waehrend der Zeiger schon auf den neuen zeigt.
-		final boolean neuSchreiben = anlass == Anlass.GESCHLOSSEN
-				|| !archivIstAktuell(ticket.id());
+		final boolean neuSchreiben = !nichtsAufgezeichnet
+				&& (anlass == Anlass.GESCHLOSSEN || !archivIstAktuell(ticket.id()));
 
 		String archiveMessageId = null;
 		final TextChannel storage = storageChannel();
 		if (storage != null && neuSchreiben) {
 			archiveMessageId = writeArchive(storage, ticket, panel, closedBy, rows);
-		} else if (storage == null) {
+		} else if (storage == null && neuSchreiben) {
 			System.err.println("Kein Storage-Kanal — Ticket " + ticket.channelName()
 					+ " wird nicht archiviert. Der Verlauf steht weiterhin in der Datenbank.");
 		} else {
@@ -259,7 +284,7 @@ public final class TranscriptArchiver {
 				.limit(10)
 				.forEach(e -> participants.append(e.getValue()).append(" · <@").append(e.getKey()).append(">\n"));
 
-		final boolean geloescht = anlass == Anlass.GELOESCHT;
+		final boolean geloescht = anlass != Anlass.GESCHLOSSEN;
 		final EmbedBuilder embed = new EmbedBuilder()
 				.setColor(new java.awt.Color(geloescht ? 0xC0392B : 0x1ec45c))
 				.addField("Ticket", ticket.channelName(), true)
@@ -268,12 +293,23 @@ public final class TranscriptArchiver {
 				.addField(geloescht ? "Gelöscht von" : "Geschlossen von",
 						closedBy == null ? "automatisch" : "<@" + closedBy + ">", true)
 				.addField("Nachrichten", String.valueOf(messageCount), true);
-		if (geloescht) {
+		if (anlass == Anlass.GELOESCHT) {
 			// Der Kanal ist gleich weg. Wer spaeter sucht, soll hier sehen,
 			// dass es ihn gab und wo der Verlauf liegt.
 			embed.setTitle("Ticket gelöscht");
 			embed.setDescription("Der Kanal wurde entfernt. Der Verlauf bleibt über "
 					+ "`/transcript holen id:" + ticket.id() + "` abrufbar.");
+		} else if (anlass == Anlass.KANAL_ENTFERNT) {
+			// Bewusst als eigener Fall erkennbar: hier hat jemand den Kanal in
+			// Discord geloescht statt den Loeschknopf zu benutzen. Der Verlauf
+			// ist gerettet, aber nur das, was bis dahin mitgeschrieben wurde.
+			embed.setTitle("Ticketkanal von Hand gelöscht");
+			embed.setDescription(messageCount == 0
+					? "Der Kanal wurde direkt in Discord entfernt, nicht über den Löschknopf. "
+							+ "Aufgezeichnet war nichts — für dieses Ticket gibt es keinen Verlauf."
+					: "Der Kanal wurde direkt in Discord entfernt, nicht über den Löschknopf. "
+							+ "Der Bot hat den Verlauf aus der Datenbank nachträglich gesichert — "
+							+ "abrufbar über `/transcript holen id:" + ticket.id() + "`.");
 		}
 
 		if (participants.length() > 0) {

@@ -126,6 +126,24 @@ Datenbank — dem Teil, den dieses System ausdrücklich als wegwerfbar behandelt
 Log-Kanal bekommt einen roten Eintrag „Ticket gelöscht" mit dem lesbaren Verlauf als
 Datei; der Verlauf bleibt über `/transcript holen` abrufbar, nur der Kanal ist weg.
 
+**Wird der Kanal von Hand in Discord gelöscht**, statt über den Knopf, merkt der Bot es
+trotzdem: ein `ChannelDeleteEvent`-Handler rettet den Verlauf aus der Datenbank ins
+Archiv, schreibt einen Log-Eintrag „Ticketkanal von Hand gelöscht" — mit dem Namen aus dem
+Audit-Log, wer es war — und setzt den Status auf `deleted`. Vorher bekam der Bot davon
+nichts mit: das Ticket stand weiter als „offen" in der Datenbank, und der Lagebericht
+zeigte wartende Bewerber, die es nicht mehr gab.
+
+Beim Start gleicht er zusätzlich ab, ob es zu jedem nicht gelöschten Ticket noch einen
+Kanal gibt — sonst entginge ihm genau das, was während eines Neustarts verschwindet.
+Fehlen dabei mehr als fünf Kanäle auf einmal, fasst er nichts an und meldet nur: dann ist
+ein unvollständiger Kanalcache die wahrscheinlichere Erklärung als fünf Löschungen, und
+reihenweise Tickets auf `deleted` zu setzen wäre schlimmer als der Zustand, den es zu
+beheben gilt.
+
+Ein Ticket, in dem nie ein Mensch etwas geschrieben hat, bekommt dabei keinen Archiv-Post
+— die aus Ticket Tool übernommenen Alt-Tickets haben bei uns nie Verlauf aufgezeichnet,
+ihr Inhalt liegt in den alten Transcripts. Der Log-Eintrag kommt trotzdem.
+
 ## Betrieb
 
 Der Bot läuft als systemd-Dienst auf dem Homeserver, dort, wo auch die Datenbank

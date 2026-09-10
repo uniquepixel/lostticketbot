@@ -329,10 +329,44 @@ public final class TicketService {
 
 		final TextChannel channel = guild.getTextChannelById(ticket.channelId());
 		if (channel != null) {
+			vermerkeEigeneLoeschung(ticket.channelId());
 			channel.delete().reason("Ticket gelöscht").complete();
 		}
 
 		TicketDao.markDeleted(ticket.id());
+	}
+
+	// -----------------------------------------------------------------------
+	// Eigene Loeschungen
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Kanaele, die der Bot selbst geloescht hat, mit Zeitpunkt.
+	 *
+	 * Discord meldet die eigene Loeschung als ganz gewoehnliches
+	 * ChannelDeleteEvent zurueck. Ohne diesen Vermerk wuerde
+	 * {@link TicketKanalWaechter} jedes ueber den Loeschknopf entfernte Ticket
+	 * ein zweites Mal archivieren und einen zweiten Log-Eintrag schreiben.
+	 *
+	 * Der Vermerk verfaellt: er soll das Event ueberdauern, das Sekunden spaeter
+	 * eintrifft, aber nicht den naechsten Kanal derselben ID — die es zwar nicht
+	 * gibt, doch eine Menge, die nur waechst, waere trotzdem ein Leck.
+	 */
+	private static final java.util.Map<String, Long> EIGENE_LOESCHUNGEN =
+			new java.util.concurrent.ConcurrentHashMap<>();
+
+	private static final long VERMERK_HAELT_MS = 300_000L;
+
+	private static void vermerkeEigeneLoeschung(String channelId) {
+		final long jetzt = System.currentTimeMillis();
+		EIGENE_LOESCHUNGEN.entrySet().removeIf(e -> jetzt - e.getValue() > VERMERK_HAELT_MS);
+		EIGENE_LOESCHUNGEN.put(channelId, jetzt);
+	}
+
+	/** Hat der Bot diesen Kanal gerade selbst geloescht? */
+	static boolean warEigeneLoeschung(String channelId) {
+		final Long zeitpunkt = EIGENE_LOESCHUNGEN.get(channelId);
+		return zeitpunkt != null && System.currentTimeMillis() - zeitpunkt <= VERMERK_HAELT_MS;
 	}
 
 	/**
