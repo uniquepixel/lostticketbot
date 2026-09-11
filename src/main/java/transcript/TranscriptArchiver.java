@@ -133,7 +133,20 @@ public final class TranscriptArchiver {
 					rs -> rs.getString(1), ticket.id()).orElse(null);
 		}
 
-		postLog(guild, ticket, panel, closedBy, rows.size(), perAuthor, archiveMessageId, anlass);
+		// Die Fussnote wird hier gebildet, nicht im Log-Eintrag: nur an dieser
+		// Stelle ist bekannt, WARUM kein Archiv entstand. "nicht archiviert —
+		// kein Storage-Kanal" unter ein Ticket zu schreiben, bei dem schlicht
+		// nichts aufzuzeichnen war, waere eine falsche Fehlermeldung.
+		final String fussnote;
+		if (archiveMessageId != null) {
+			fussnote = "Archiv: " + archiveMessageId;
+		} else if (nichtsAufgezeichnet) {
+			fussnote = "kein Archiv — es war nichts aufgezeichnet";
+		} else {
+			fussnote = "nicht archiviert — kein Storage-Kanal";
+		}
+
+		postLog(guild, ticket, panel, closedBy, rows.size(), perAuthor, fussnote, anlass);
 
 		// Beim Loeschen keine DM: geschlossen wurde vorher schon einmal
 		// gemeldet, und "dein Ticket wurde geschlossen" zum zweiten Mal
@@ -263,7 +276,7 @@ public final class TranscriptArchiver {
 
 	/** Der Log-Eintrag im Kanal des Panels — bewusst nah an dem, was Ticket Tool schreibt. */
 	private static void postLog(Guild guild, Ticket ticket, Panel panel, String closedBy,
-			int messageCount, Map<String, Integer> perAuthor, String archiveMessageId,
+			int messageCount, Map<String, Integer> perAuthor, String fussnote,
 			Anlass anlass) {
 		// Ohne Panel gibt es keinen Log-Kanal, an den man den Eintrag haengen
 		// koennte. Der Verlauf ist trotzdem gesichert — das Archiv haengt am
@@ -315,9 +328,7 @@ public final class TranscriptArchiver {
 		if (participants.length() > 0) {
 			embed.addField("Beteiligte", participants.toString(), false);
 		}
-		embed.setFooter(archiveMessageId == null
-				? "nicht archiviert — kein Storage-Kanal"
-				: "Archiv: " + archiveMessageId);
+		embed.setFooter(fussnote);
 
 		// Die lesbare Datei haengt am Log-Eintrag, so wie es Ticket Tool
 		// gemacht hat. Die Orga oeffnet den Log-Kanal und klickt die Datei an —

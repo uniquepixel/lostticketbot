@@ -148,8 +148,18 @@ class KanalGeloeschtTest {
 		assertNotNull(nachher.closedAt(),
 				"Ein Ticket ohne Schließzeitpunkt fehlt in jeder Statistik");
 
-		assertNotNull(logEintrag(TITEL_VON_HAND, "weg-0001"),
-				"Im Log-Kanal steht kein Hinweis, dass es diesen Kanal gab");
+		final Message eintrag = logEintrag(TITEL_VON_HAND, "weg-0001");
+		assertNotNull(eintrag, "Im Log-Kanal steht kein Hinweis, dass es diesen Kanal gab");
+
+		// In diesem Ticket hat nur der Bot geschrieben — da ist nichts zu
+		// retten, und es entsteht bewusst kein Archiv-Post. Die Fußnote muss
+		// das sagen und nicht einen Fehler behaupten, den es nicht gibt.
+		final MessageEmbed embed = eintrag.getEmbeds().stream()
+				.filter(e -> TITEL_VON_HAND.equals(e.getTitle()))
+				.findFirst().orElseThrow();
+		assertNotNull(embed.getFooter());
+		assertEquals("kein Archiv — es war nichts aufgezeichnet", embed.getFooter().getText(),
+				"Die Fußnote behauptet etwas anderes als den wahren Grund");
 	}
 
 	@Test
