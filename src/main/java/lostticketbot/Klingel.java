@@ -15,6 +15,7 @@ import java.util.stream.Collectors;
 
 import javax.annotation.Nonnull;
 
+import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 
@@ -86,6 +87,38 @@ public class Klingel extends ListenerAdapter {
 		return sauber.length() <= 120 ? sauber : sauber.substring(0, 117) + "...";
 	}
 
+	/**
+	 * Was in der Nachricht steckt — auch wenn kein Text drin ist.
+	 *
+	 * Ein Sticker oder ein Bild ohne Begleittext ergab sonst nur "(ohne Text)",
+	 * und damit weiss der Empfaenger nicht, ob die Leitung klemmt oder ob
+	 * wirklich nichts geschrieben wurde. Genau das ist bei der ersten echten
+	 * Nachricht am 11.09.2026 passiert.
+	 */
+	static String inhalt(Message nachricht) {
+		final String text = kurzfassung(nachricht.getContentDisplay());
+		final StringBuilder dazu = new StringBuilder();
+		if (!nachricht.getAttachments().isEmpty()) {
+			dazu.append(nachricht.getAttachments().size()).append(" Anhang/Anhaenge");
+		}
+		if (!nachricht.getStickers().isEmpty()) {
+			if (dazu.length() > 0) {
+				dazu.append(", ");
+			}
+			dazu.append("Sticker ").append(nachricht.getStickers().get(0).getName());
+		}
+		if (!nachricht.getEmbeds().isEmpty()) {
+			if (dazu.length() > 0) {
+				dazu.append(", ");
+			}
+			dazu.append(nachricht.getEmbeds().size()).append(" Einbettung(en)");
+		}
+		if (dazu.length() == 0) {
+			return text;
+		}
+		return "(ohne Text)".equals(text) ? "[" + dazu + "]" : text + " [" + dazu + "]";
+	}
+
 	/** true, wenn fuer diesen Nutzer gerade geklingelt werden darf. */
 	static boolean entprellt(String userId, long jetzt) {
 		final Long vorher = ZULETZT.get(userId);
@@ -115,7 +148,7 @@ public class Klingel extends ListenerAdapter {
 
 		final String wer = event.getAuthor().getEffectiveName();
 		try {
-			Files.writeString(DATEI, zeile(wer, event.getMessage().getContentDisplay(), LocalTime.now()) + "\n",
+			Files.writeString(DATEI, zeile(wer, inhalt(event.getMessage()), LocalTime.now()) + "\n",
 					StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
 		} catch (IOException e) {
 			System.err.println("Klingel: konnte " + DATEI + " nicht schreiben: " + e.getMessage());
