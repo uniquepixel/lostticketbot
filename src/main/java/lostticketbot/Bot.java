@@ -114,8 +114,11 @@ public class Bot extends ListenerAdapter {
 				// Ticketkanal von Hand in Discord geloescht, rettet er den
 				// Verlauf ins Archiv und stellt den Status um. Ohne ihn stand
 				// das Ticket weiter als offen in der Datenbank.
+				// Klingel hoert auf Direktnachrichten Berechtigter und legt eine
+				// Zeile ab, auf die der Assistent sofort reagiert. Sie fasst
+				// nichts am Ticketbetrieb an.
 				.addEventListeners(new Bot(), new TicketInteractions(), new TranscriptRecorder(),
-						new TicketKanalWaechter(),
+						new TicketKanalWaechter(), new Klingel(),
 						new PanelCommand(), new MenuCommand(), new LegacyCommand(), new TicketCommand(), new ConfigCommand(), new AdoptCommand(), new TranscriptCommand())
 				.build();
 
