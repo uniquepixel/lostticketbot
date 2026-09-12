@@ -45,13 +45,34 @@ public class Klingel extends ListenerAdapter {
 					System.getProperty("user.home") + "/lost/klingel.log"));
 
 	/**
-	 * Entprellung. Jede Zeile kostet Platz im Gespraech des Assistenten — und
-	 * Platz dort ist knapp. Wer in einem Zug fuenf Nachrichten schickt, soll
-	 * einmal klingeln, nicht fuenfmal.
+	 * Schutz vor einer Flut — aber keiner, der Nachrichten verschluckt.
+	 *
+	 * Die erste Fassung entprellte zwei Minuten lang und liess alles dazwischen
+	 * lautlos fallen. Am 11.09.2026 sind so zwei echte Nachrichten verlorengegangen,
+	 * ohne dass der Absender auch nur die Eingangsbestaetigung sah. Eine Klingel,
+	 * die Nachrichten frisst, ist schlimmer als gar keine: man verlaesst sich auf
+	 * sie.
+	 *
+	 * Jetzt klingelt jede Nachricht. Nur wer in einer Minute mehr als
+	 * HOECHSTENS_JE_MINUTE schickt, bekommt eine einzelne Sammelzeile statt vieler
+	 * — und auch die sagt, dass da noch etwas liegt.
 	 */
-	private static final long ENTPRELLUNG_MS = 120_000L;
+	static final int HOECHSTENS_JE_MINUTE = 8;
 
-	private static final ConcurrentHashMap<String, Long> ZULETZT = new ConcurrentHashMap<>();
+	private static final long FENSTER_MS = 60_000L;
+
+	/** Was mit dieser Nachricht geschehen soll. */
+	enum Entscheidung {
+		/** Normal klingeln. */
+		KLINGELN,
+		/** Einmalige Sammelzeile: ab hier wird unterdrueckt. */
+		SAMMELN,
+		/** Schon gemeldet, nichts weiter schreiben. */
+		STILL
+	}
+
+	/** Zaehler je Nutzer: [Fensterbeginn, Anzahl im Fenster]. */
+	private static final ConcurrentHashMap<String, long[]> FENSTER = new ConcurrentHashMap<>();
 
 	private static final DateTimeFormatter UHRZEIT = DateTimeFormatter.ofPattern("HH:mm");
 
@@ -119,14 +140,17 @@ public class Klingel extends ListenerAdapter {
 		return "(ohne Text)".equals(text) ? "[" + dazu + "]" : text + " [" + dazu + "]";
 	}
 
-	/** true, wenn fuer diesen Nutzer gerade geklingelt werden darf. */
-	static boolean entprellt(String userId, long jetzt) {
-		final Long vorher = ZULETZT.get(userId);
-		if (vorher != null && jetzt - vorher < ENTPRELLUNG_MS) {
-			return false;
+	static Entscheidung entscheide(String userId, long jetzt) {
+		final long[] stand = FENSTER.compute(userId, (k, alt) -> {
+			if (alt == null || jetzt - alt[0] >= FENSTER_MS) {
+				return new long[] { jetzt, 1L };
+			}
+			return new long[] { alt[0], alt[1] + 1L };
+		});
+		if (stand[1] <= HOECHSTENS_JE_MINUTE) {
+			return Entscheidung.KLINGELN;
 		}
-		ZULETZT.put(userId, jetzt);
-		return true;
+		return stand[1] == HOECHSTENS_JE_MINUTE + 1L ? Entscheidung.SAMMELN : Entscheidung.STILL;
 	}
 
 	static String zeile(String wer, String was, LocalTime zeit) {
@@ -142,13 +166,17 @@ public class Klingel extends ListenerAdapter {
 		if (!darfKlingeln(id)) {
 			return;
 		}
-		if (!entprellt(id, System.currentTimeMillis())) {
+		final Entscheidung was = entscheide(id, System.currentTimeMillis());
+		if (was == Entscheidung.STILL) {
 			return;
 		}
 
 		final String wer = event.getAuthor().getEffectiveName();
+		final String inhalt = was == Entscheidung.SAMMELN
+				? "schickt gerade sehr viel — ab hier ungelesen, bitte im DM-Verlauf nachsehen"
+				: inhalt(event.getMessage());
 		try {
-			Files.writeString(DATEI, zeile(wer, inhalt(event.getMessage()), LocalTime.now()) + "\n",
+			Files.writeString(DATEI, zeile(wer, inhalt, LocalTime.now()) + "\n",
 					StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
 		} catch (IOException e) {
 			System.err.println("Klingel: konnte " + DATEI + " nicht schreiben: " + e.getMessage());

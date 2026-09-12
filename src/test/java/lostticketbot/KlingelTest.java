@@ -51,15 +51,37 @@ class KlingelTest {
 	}
 
 	@Test
-	@DisplayName("Zweites Klingeln binnen der Entprellung faellt aus")
-	void entprellung() {
+	@DisplayName("Jede einzelne Nachricht klingelt — nichts geht still verloren")
+	void nichtsGehtVerloren() {
 		final long t = 1_000_000L;
-		assertTrue(Klingel.entprellt("probe-1", t));
-		assertFalse(Klingel.entprellt("probe-1", t + 1_000L));
-		assertFalse(Klingel.entprellt("probe-1", t + 119_000L));
-		assertTrue(Klingel.entprellt("probe-1", t + 121_000L));
-		// Ein anderer Nutzer ist davon nicht betroffen.
-		assertTrue(Klingel.entprellt("probe-2", t + 1_000L));
+		// Genau der Fall, der am 11.09.2026 zwei Nachrichten gefressen hat:
+		// mehrere Nachrichten binnen Sekunden.
+		assertEquals(Klingel.Entscheidung.KLINGELN, Klingel.entscheide("a", t));
+		assertEquals(Klingel.Entscheidung.KLINGELN, Klingel.entscheide("a", t + 2_000L));
+		assertEquals(Klingel.Entscheidung.KLINGELN, Klingel.entscheide("a", t + 60_000L));
+	}
+
+	@Test
+	@DisplayName("Eine Flut ergibt eine Sammelzeile, danach Ruhe")
+	void flut() {
+		final long t = 2_000_000L;
+		for (int i = 0; i < Klingel.HOECHSTENS_JE_MINUTE; i++) {
+			assertEquals(Klingel.Entscheidung.KLINGELN, Klingel.entscheide("b", t + i));
+		}
+		assertEquals(Klingel.Entscheidung.SAMMELN, Klingel.entscheide("b", t + 100L));
+		assertEquals(Klingel.Entscheidung.STILL, Klingel.entscheide("b", t + 101L));
+		// Nach dem Fenster geht es normal weiter.
+		assertEquals(Klingel.Entscheidung.KLINGELN, Klingel.entscheide("b", t + 61_000L));
+	}
+
+	@Test
+	@DisplayName("Die Flut eines Nutzers bremst einen anderen nicht aus")
+	void getrennteZaehler() {
+		final long t = 3_000_000L;
+		for (int i = 0; i <= Klingel.HOECHSTENS_JE_MINUTE + 2; i++) {
+			Klingel.entscheide("c", t + i);
+		}
+		assertEquals(Klingel.Entscheidung.KLINGELN, Klingel.entscheide("d", t + 5L));
 	}
 
 	@Test
