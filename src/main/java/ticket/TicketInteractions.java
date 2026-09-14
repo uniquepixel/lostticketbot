@@ -142,8 +142,16 @@ public class TicketInteractions extends ListenerAdapter {
 		}, "ticket-open-" + member.getId()).start());
 	}
 
-	/** Die erste Nachricht im frisch angelegten Ticket. */
-	private void postWelcome(TextChannel channel, Panel panel, Member owner) {
+	/**
+	 * Die erste Nachricht im frisch angelegten Ticket.
+	 *
+	 * Paketsichtbar statt privat, damit der Ende-zu-Ende-Test sie gegen echtes
+	 * Discord pruefen kann. Ausgeloest wird sie sonst nur durch einen
+	 * Knopfdruck, und genau den kann ein Bot nicht simulieren — die Nachricht
+	 * waere damit ausgerechnet an der Stelle ungetestet, die jeder Bewerber als
+	 * erstes sieht.
+	 */
+	void postWelcome(TextChannel channel, Panel panel, Member owner) {
 		final GuildConfig config = GuildConfigDao.get(panel.guildId());
 
 		final List<String> mentions = new ArrayList<>();

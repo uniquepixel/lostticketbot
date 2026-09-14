@@ -30,6 +30,8 @@ import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
+import net.dv8tion.jda.api.entities.Message;
+import net.dv8tion.jda.api.entities.MessageEmbed;
 import net.dv8tion.jda.api.entities.PermissionOverride;
 import net.dv8tion.jda.api.entities.channel.concrete.Category;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
@@ -377,5 +379,80 @@ class DiscordEndToEndTest {
 		final Optional<Ticket> neu = TicketDao.byChannel(result.channel().getId());
 		result.channel().delete().complete();
 		neu.ifPresent(t -> Database.update("DELETE FROM tickets WHERE id = ?", t.id()));
+	}
+
+	@Test
+	@Order(99)
+	@DisplayName("Die Willkommensnachricht traegt die Anweisung an den Eroeffner")
+	void willkommensnachricht() {
+		// Am 14.09.2026 gemeldet: in den Aufstiegstickets stand nach der
+		// Umstellung nicht mehr, was der Eroeffner mitschicken soll. Der Text
+		// ist eine Datenzeile, der Aufbau drumherum aber Code — und der war
+		// ungetestet, weil die Nachricht nur auf Knopfdruck entsteht.
+		//
+		// Besonders geprueft wird der Rueckfall des Embed-Titels auf den
+		// Panelnamen. Genau darauf beruht die Korrektur: die Beschreibung darf
+		// mit der Anweisung belegt werden, ohne dass der Clanname verlorengeht.
+		//
+		// Eigener Kanal, eigenes Aufraeumen, Order ganz hinten: beim ersten
+		// Anlauf hing dieser Test am Kanal des Oeffnen-Tests und hat mit seinem
+		// Abfrage-Verkehr das Rate-Limit so weit aufgebraucht, dass die
+		// Rechteaenderung im Schliessen-Test noch nicht durch war. Ein Test
+		// darf einem anderen nicht in die Quere kommen.
+		final String anweisung = "Teile uns bitte deine Ambitionen mit.";
+		PanelDao.set(panelId, "welcome_text", "Hey {user}, schoen dass du aufsteigen moechtest.");
+		PanelDao.set(panelId, "welcome_embed_text", anweisung);
+		PanelDao.set(panelId, "welcome_embed_title", "");
+
+		final Panel panel = PanelDao.byId(panelId).orElseThrow();
+		final TextChannel kanal = guild.createTextChannel("e2e-willkommen").setParent(kategorie).complete();
+		try {
+			new TicketInteractions().postWelcome(kanal, panel, guild.getSelfMember());
+
+			// postWelcome schickt ueber queue(), die Nachricht ist also nicht
+			// sofort da. Wenige, grosszuegige Versuche statt vieler schneller —
+			// jeder Abruf kostet Rate-Limit-Budget.
+			Message willkommen = null;
+			for (int versuch = 0; versuch < 6 && willkommen == null; versuch++) {
+				try {
+					Thread.sleep(1000);
+				} catch (final InterruptedException e) {
+					Thread.currentThread().interrupt();
+				}
+				willkommen = kanal.getHistory().retrievePast(5).complete().stream()
+						.filter(m -> !m.getEmbeds().isEmpty())
+						.findFirst().orElse(null);
+			}
+			assertNotNull(willkommen, "Die Willkommensnachricht kam nicht an");
+
+			final MessageEmbed embed = willkommen.getEmbeds().get(0);
+			assertEquals(anweisung, embed.getDescription(),
+					"Die Anweisung an den Eroeffner muss in der Beschreibung stehen");
+			assertEquals(panel.name(), embed.getTitle(),
+					"Ohne eigenen Titel faellt der Embed auf den Panelnamen zurueck");
+
+			// Der Eroeffner darf nicht doppelt drinstehen: der Text erwaehnt ihn
+			// ueber {user}, also stellt der Bot keine zweite Erwaehnung voran.
+			final String inhalt = willkommen.getContentRaw();
+			assertEquals(1, zaehleErwaehnungen(inhalt, guild.getSelfMember().getId()),
+					() -> "Eroeffner genau einmal erwartet, Nachricht war: " + inhalt);
+			assertTrue(inhalt.contains("schoen dass du aufsteigen moechtest"),
+					() -> "Der Willkommenstext fehlt: " + inhalt);
+		} finally {
+			kanal.delete().complete();
+		}
+	}
+
+	/** Wie oft taucht diese Benutzer-ID als Erwaehnung auf? {@code <@id>} und {@code <@!id>}. */
+	private static int zaehleErwaehnungen(String text, String userId) {
+		int n = 0;
+		for (final String form : List.of("<@" + userId + ">", "<@!" + userId + ">")) {
+			int ab = 0;
+			while ((ab = text.indexOf(form, ab)) >= 0) {
+				n++;
+				ab += form.length();
+			}
+		}
+		return n;
 	}
 }
