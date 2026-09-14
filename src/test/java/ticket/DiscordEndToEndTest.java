@@ -399,8 +399,15 @@ class DiscordEndToEndTest {
 		// Abfrage-Verkehr das Rate-Limit so weit aufgebraucht, dass die
 		// Rechteaenderung im Schliessen-Test noch nicht durch war. Ein Test
 		// darf einem anderen nicht in die Quere kommen.
+		// Mehrzeilig und mit {user} in der ersten Zeile — genau so stehen die
+		// Texte seit dem 14.09.2026 in der Datenbank. Die Umbrueche waren bei
+		// der Umstellung von Ticket Tool verlorengegangen und sind wieder drin;
+		// dass sie die Nachricht heil ueberstehen, gehoert damit geprueft.
+		final String willkommenstext = "Hey {user},\nBitte warte, bis sich ein zustaendiger"
+				+ " Vize-Anfuehrer bei dir meldet.\nIn der Zwischenzeit sende uns bitte"
+				+ " Screenshots deines Profils.\nWir melden uns schnellstmoeglich!";
 		final String anweisung = "Teile uns bitte deine Ambitionen mit.";
-		PanelDao.set(panelId, "welcome_text", "Hey {user}, schoen dass du aufsteigen moechtest.");
+		PanelDao.set(panelId, "welcome_text", willkommenstext);
 		PanelDao.set(panelId, "welcome_embed_text", anweisung);
 		PanelDao.set(panelId, "welcome_embed_title", "");
 
@@ -436,8 +443,10 @@ class DiscordEndToEndTest {
 			final String inhalt = willkommen.getContentRaw();
 			assertEquals(1, zaehleErwaehnungen(inhalt, guild.getSelfMember().getId()),
 					() -> "Eroeffner genau einmal erwartet, Nachricht war: " + inhalt);
-			assertTrue(inhalt.contains("schoen dass du aufsteigen moechtest"),
+			assertTrue(inhalt.contains("Wir melden uns schnellstmoeglich!"),
 					() -> "Der Willkommenstext fehlt: " + inhalt);
+			assertEquals(3, inhalt.chars().filter(c -> c == '\n').count(),
+					() -> "Die drei Zeilenumbrueche muessen erhalten bleiben: " + inhalt);
 		} finally {
 			kanal.delete().complete();
 		}
