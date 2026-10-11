@@ -114,11 +114,11 @@ public class Bot extends ListenerAdapter {
 				// Ticketkanal von Hand in Discord geloescht, rettet er den
 				// Verlauf ins Archiv und stellt den Status um. Ohne ihn stand
 				// das Ticket weiter als offen in der Datenbank.
-				// Klingel hoert auf Direktnachrichten Berechtigter und legt eine
-				// Zeile ab, auf die der Assistent sofort reagiert. Sie fasst
-				// nichts am Ticketbetrieb an.
+				// Die Klingel ist seit dem 11.10.2026 im LOST Manager (Jonas: "für
+				// Claude Sachen nurnoch Lost Manager"); Klingel.java bleibt nur fuer
+				// ihre Tests und als Vorlage stehen.
 				.addEventListeners(new Bot(), new TicketInteractions(), new TranscriptRecorder(),
-						new TicketKanalWaechter(), new Klingel(),
+						new TicketKanalWaechter(),
 						new PanelCommand(), new MenuCommand(), new LegacyCommand(), new TicketCommand(), new ConfigCommand(), new AdoptCommand(), new TranscriptCommand())
 				.build();
 
