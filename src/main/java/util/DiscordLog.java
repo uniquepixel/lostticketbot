@@ -29,9 +29,12 @@ import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
  * <li><b>Begrenzte Warteschlange.</b> Kommt der Kanal nicht hinterher, gehen
  * Zeilen verloren statt Arbeitsspeicher. Ein Log ist Beiwerk; der Bot ist es
  * nicht.</li>
- * <li><b>Selbstabschaltung.</b> Scheitert das Senden mehrfach hintereinander,
- * hoert der Spiegel auf. Sonst protokolliert JDA den Fehlschlag, der Fehlschlag
- * landet in der Warteschlange, und das Ganze dreht sich im Kreis.</li>
+ * <li><b>Pause statt Selbstabschaltung.</b> Scheitert das Senden mehrfach
+ * hintereinander, pausiert der Spiegel fuer {@link #PAUSE_MS} und versucht es
+ * dann wieder. Ohne Pause protokollierte JDA den Fehlschlag, der Fehlschlag
+ * landete in der Warteschlange, und das Ganze drehte sich im Kreis. Bis zum
+ * 23.10.2026 schaltete er sich dabei fuer immer ab — acht Sekunden ohne DNS
+ * am Morgen, und der Log-Kanal blieb bis zum naechsten Neustart stumm.</li>
  * </ul>
  *
  * Der Kanal kommt aus {@code TICKETBOT_LOG_CHANNEL_ID}. Ohne ihn passiert
@@ -44,6 +47,10 @@ public final class DiscordLog {
 
 	private static final String THREAD = "discord-log";
 	private static final int MAX_FEHLER = 5;
+	static final long PAUSE_MS = 5 * 60 * 1000;
+	static java.util.function.LongSupplier uhr = System::currentTimeMillis;
+	/** Bis wann nichts gespiegelt wird; 0 = keine Pause. */
+	private static volatile long pauseBis;
 
 	/** So viel Text wird hoechstens gehalten, solange JDA noch nicht bereit ist. */
 	private static final int HALTEGRENZE = 100_000;
@@ -130,7 +137,7 @@ public final class DiscordLog {
 			zeile.reset();
 			// Nicht aus dem eigenen Sendethread mitschreiben, sonst erzeugt
 			// jede Meldung ueber das Senden die naechste Meldung.
-			if (an && !text.isBlank() && !THREAD.equals(Thread.currentThread().getName())) {
+			if (aktiv() && !text.isBlank() && !THREAD.equals(Thread.currentThread().getName())) {
 				zeilen.offer(text);
 			}
 		}
@@ -144,6 +151,13 @@ public final class DiscordLog {
 		while (an) {
 			try {
 				final String z = zeilen.poll(1, TimeUnit.SECONDS);
+				if (!aktiv()) {
+					// In der Pause wird verworfen, nicht gesammelt: sonst kaeme
+					// danach ein Schwall alter Zeilen auf einmal.
+					puffer.clear();
+					laenge = 0;
+					continue;
+				}
 				if (z != null) {
 					puffer.add(z);
 					laenge += z.length() + 1;
@@ -269,21 +283,29 @@ public final class DiscordLog {
 		originalErr.println("Discord-Log: " + grund);
 		if (fehlerInFolge.incrementAndGet() >= MAX_FEHLER) {
 			originalErr.println("Discord-Log: " + MAX_FEHLER
-					+ "-mal hintereinander gescheitert — Spiegel aus.");
-			an = false;
+					+ "-mal hintereinander gescheitert — Spiegel pausiert "
+					+ (PAUSE_MS / 60000) + " Minuten.");
+			fehlerInFolge.set(0);
+			pauseBis = uhr.getAsLong() + PAUSE_MS;
 		}
+	}
+
+	private static boolean aktiv() {
+		return an && uhr.getAsLong() >= pauseBis;
 	}
 
 	// -- nur fuer Tests ------------------------------------------------------
 
 	static void fuerTestZuruecksetzen() {
 		fehlerInFolge.set(0);
+		pauseBis = 0;
+		uhr = System::currentTimeMillis;
 		an = true;
 		originalErr = System.err;
 	}
 
 	static boolean istAn() {
-		return an;
+		return aktiv();
 	}
 
 	static void fuerTestScheitern(String grund) {

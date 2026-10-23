@@ -133,6 +133,25 @@ class DiscordLogTest {
 	}
 
 	@Test
+	@DisplayName("Nach der Pause spiegelt er wieder (23.10.2026: 8 s ohne DNS)")
+	void nachDerPauseWiederAn() {
+		DiscordLog.fuerTestZuruecksetzen();
+		final long[] jetzt = { 1_000_000L };
+		DiscordLog.uhr = () -> jetzt[0];
+		for (int i = 0; i < 5; i++) {
+			DiscordLog.fuerTestScheitern("DNS weg");
+		}
+		assertFalse(DiscordLog.istAn(), "In der Pause wird nicht gespiegelt");
+		jetzt[0] += DiscordLog.PAUSE_MS - 1;
+		assertFalse(DiscordLog.istAn(), "Kurz vor Ende der Pause noch nicht");
+		jetzt[0] += 1;
+		assertTrue(DiscordLog.istAn(), "Nach der Pause wieder an – nicht erst nach einem Neustart");
+		DiscordLog.fuerTestScheitern("ein einzelner Fehlschlag danach");
+		assertTrue(DiscordLog.istAn(), "Der Zähler beginnt nach der Pause von vorn");
+		DiscordLog.fuerTestZuruecksetzen();
+	}
+
+	@Test
 	@DisplayName("Ein Erfolg setzt den Zähler zurück")
 	void erfolgSetztZurueck() {
 		DiscordLog.fuerTestZuruecksetzen();
