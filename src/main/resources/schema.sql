@@ -268,6 +268,27 @@ CREATE TABLE IF NOT EXISTS adoption_exclusions (
 );
 
 -- ---------------------------------------------------------------------------
+-- Fragen beim Öffnen (Formular)
+-- ---------------------------------------------------------------------------
+
+-- Hat ein Panel Fragen, bekommt der Klickende vor dem Anlegen ein Discord-
+-- Formular (Modal) mit höchstens fünf Feldern; die Antworten stehen als erste
+-- Nachricht nach der Begrüßung im Ticket. Discord-Grenzen: Feldname 45 Zeichen,
+-- Platzhalter 100, Antwort höchstens 4000.
+CREATE TABLE IF NOT EXISTS panel_questions (
+    id          BIGSERIAL PRIMARY KEY,
+    panel_id    BIGINT   NOT NULL REFERENCES panels(id) ON DELETE CASCADE,
+    position    SMALLINT NOT NULL DEFAULT 0,
+    label       TEXT     NOT NULL,
+    placeholder TEXT,
+    long_answer BOOLEAN  NOT NULL DEFAULT FALSE,
+    required    BOOLEAN  NOT NULL DEFAULT TRUE,
+    max_length  SMALLINT
+);
+
+CREATE INDEX IF NOT EXISTS idx_panel_questions ON panel_questions(panel_id, position);
+
+-- ---------------------------------------------------------------------------
 -- Indizes
 -- ---------------------------------------------------------------------------
 

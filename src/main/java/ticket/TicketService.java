@@ -93,6 +93,14 @@ public final class TicketService {
 		return new OpenResult(ticket, channel, null);
 	}
 
+	/**
+	 * Dieselbe Prüfung, die {@link #open} macht — vorab, damit niemand ein
+	 * Formular ausfüllt, nur um danach zu erfahren, dass er gar nicht darf.
+	 */
+	public static Optional<String> pruefeOeffnen(Guild guild, Panel panel, Member opener) {
+		return checkAllowed(guild, panel, opener);
+	}
+
 	/** Prüft Blacklist, Limits und Cooldown. Leeres Optional heißt: darf öffnen. */
 	private static Optional<String> checkAllowed(Guild guild, Panel panel, Member opener) {
 		final String guildId = guild.getId();

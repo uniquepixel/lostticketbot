@@ -79,6 +79,44 @@ public final class MenuRenderer {
 		}
 	}
 
+	/**
+	 * Wie {@link #postOrUpdate}, aber wartet auf Discord und gibt die ID der
+	 * Nachricht zurück.
+	 *
+	 * Für die Website: dort soll nach dem Knopfdruck feststehen, ob das Menü
+	 * wirklich steht, statt dass ein Fehler nur im Log landet. Fehler von
+	 * Discord (etwa ein ungültiges Emoji) kommen als Ausnahme heraus. Nicht
+	 * auf dem JDA-Ereignisthread aufrufen.
+	 */
+	public static String veroeffentlichen(TextChannel channel, Menu menu) {
+		final GuildConfig config = GuildConfigDao.get(menu.guildId());
+		final int color = menu.embedColor() != null ? menu.embedColor() : config.panelEmbedColor();
+		final MessageEmbed embed = MessageUtil.embed(menu.embedTitle(), menu.embedText(), color);
+		final List<ActionRow> rows = buildRows(menu);
+
+		if (menu.isPosted()) {
+			Message vorhanden = null;
+			try {
+				vorhanden = channel.retrieveMessageById(menu.messageId()).complete();
+			} catch (final net.dv8tion.jda.api.exceptions.ErrorResponseException e) {
+				if (e.getErrorResponse() != net.dv8tion.jda.api.requests.ErrorResponse.UNKNOWN_MESSAGE) {
+					throw e;
+				}
+				// Nachricht weg (gelöscht, Kanal geleert): neu posten wie postOrUpdate.
+			}
+			if (vorhanden != null) {
+				vorhanden.editMessage(new MessageEditBuilder().setEmbeds(embed).setComponents(rows).build())
+						.complete();
+				return vorhanden.getId();
+			}
+		}
+		final Message gepostet = channel
+				.sendMessage(new MessageCreateBuilder().setEmbeds(embed).setComponents(rows).build())
+				.complete();
+		MenuDao.setMessageId(menu.id(), gepostet.getId());
+		return gepostet.getId();
+	}
+
 	private static void send(TextChannel channel, Menu menu, MessageEmbed embed, List<ActionRow> rows) {
 		channel.sendMessage(new MessageCreateBuilder().setEmbeds(embed).setComponents(rows).build())
 				.queue((Message posted) -> MenuDao.setMessageId(menu.id(), posted.getId()));

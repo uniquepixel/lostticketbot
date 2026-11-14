@@ -235,6 +235,11 @@ public class Bot extends ListenerAdapter {
 		}, "owner-left-" + userId).start();
 	}
 
+	/** Nur für Tests, die eine eigene JDA-Verbindung aufbauen (etwa die Verwaltungs-API gegen den Testserver). */
+	public static void setJdaFuerTests(JDA testJda) {
+		jda = testJda;
+	}
+
 	public static JDA jda() {
 		return jda;
 	}

@@ -47,6 +47,9 @@ public class TicketApiServer {
 		registriere("/api/guilds", TicketEndpoints::guilds);
 		registriere("/api/stats", TicketEndpoints::stats);
 		registriere("/api/legacy", TicketEndpoints::legacy);
+		// Die Verwaltung liest (GET) und schreibt (POST) unter einem Pfad. Das
+		// Recht prueft VerwaltungEndpoints gegen die echten Discord-Rechte.
+		registriere("/api/verwaltung", VerwaltungEndpoints::bearbeiten, true);
 		server.createContext("/api/health", exchange -> {
 			antworten(exchange, 200, Map.of("status", "ok"));
 		});
@@ -67,8 +70,16 @@ public class TicketApiServer {
 	 * Antwort rausgeht statt einer haengenden Verbindung.
 	 */
 	void registriere(String pfad, Endpunkt endpunkt) {
-		server.createContext(pfad, exchange -> route(exchange, endpunkt));
+		registriere(pfad, endpunkt, false);
 	}
+
+	/** Wie oben; mit {@code schreibend} nimmt der Pfad auch POST mit JSON-Koerper an. */
+	void registriere(String pfad, Endpunkt endpunkt, boolean schreibend) {
+		server.createContext(pfad, exchange -> route(exchange, endpunkt, schreibend));
+	}
+
+	/** Groesser wird kein Verwaltungsaufruf; ein Menuetext hat hoechstens 4000 Zeichen. */
+	static final int MAX_KOERPER = 64 * 1024;
 
 	public void stop() {
 		if (server != null) {
@@ -82,7 +93,12 @@ public class TicketApiServer {
 	}
 
 	/** Was ein Endpunkt ueber die Anfrage wissen muss. */
-	public record Anfrage(String pfad, Map<String, String> parameter, String discordUserId) {
+	public record Anfrage(String pfad, Map<String, String> parameter, String discordUserId,
+			String methode, Map<String, Object> koerper, boolean websiteAdmin) {
+
+		public Anfrage(String pfad, Map<String, String> parameter, String discordUserId) {
+			this(pfad, parameter, discordUserId, "GET", Map.of(), false);
+		}
 
 		public String param(String name) {
 			return parameter.get(name);
@@ -102,10 +118,11 @@ public class TicketApiServer {
 		}
 	}
 
-	private void route(HttpExchange exchange, Endpunkt endpunkt) throws IOException {
+	private void route(HttpExchange exchange, Endpunkt endpunkt, boolean schreibend) throws IOException {
 		try {
-			if (!"GET".equals(exchange.getRequestMethod())) {
-				antworten(exchange, 405, Map.of("error", "Nur GET"));
+			final String methode = exchange.getRequestMethod();
+			if (!"GET".equals(methode) && !(schreibend && "POST".equals(methode))) {
+				antworten(exchange, 405, Map.of("error", schreibend ? "Nur GET oder POST" : "Nur GET"));
 				return;
 			}
 			if (!tokenStimmt(exchange)) {
@@ -122,15 +139,39 @@ public class TicketApiServer {
 				return;
 			}
 
+			Map<String, Object> koerper = Map.of();
+			if ("POST".equals(methode)) {
+				final byte[] roh = exchange.getRequestBody().readNBytes(MAX_KOERPER + 1);
+				if (roh.length > MAX_KOERPER) {
+					antworten(exchange, 413, Map.of("error", "Anfrage zu gross"));
+					return;
+				}
+				try {
+					koerper = roh.length == 0 ? Map.of()
+							: json.readValue(roh, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {
+							});
+				} catch (final IOException e) {
+					antworten(exchange, 400, Map.of("error", "Der Koerper ist kein JSON-Objekt"));
+					return;
+				}
+			}
+
+			// Website-Admin setzt das Website-Backend aus dem signierten
+			// Anmeldetoken. Es kommt nur zusammen mit dem API-Token an, das der
+			// Browser nie sieht.
+			final boolean websiteAdmin = "1".equals(exchange.getRequestHeaders().getFirst("X-Website-Admin"));
+
 			final Anfrage anfrage = new Anfrage(
 					exchange.getRequestURI().getPath(),
 					parameterLesen(exchange.getRequestURI().getRawQuery()),
-					discordUser);
+					discordUser, methode, koerper, websiteAdmin);
 
 			antworten(exchange, 200, endpunkt.bearbeiten(anfrage));
 
+		} catch (final verwaltung.Verwaltung.KeinRecht e) {
+			antworten(exchange, 403, Map.of("error", e.getMessage()));
 		} catch (final IllegalArgumentException e) {
-			antworten(exchange, 400, Map.of("error", e.getMessage()));
+			antworten(exchange, 400, Map.of("error", String.valueOf(e.getMessage())));
 		} catch (final SecurityException e) {
 			// Bewusst 404 statt 403: wer ein Ticket nicht sehen darf, soll auch
 			// nicht erfahren, dass es existiert.

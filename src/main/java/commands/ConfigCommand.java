@@ -9,6 +9,7 @@ import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEve
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.interactions.commands.OptionMapping;
 import util.MessageUtil;
+import verwaltung.Verwaltung;
 
 /**
  * Serverweite Einstellungen und die Blacklist.
@@ -58,12 +59,13 @@ public class ConfigCommand extends ListenerAdapter {
 
 	private void limit(SlashCommandInteractionEvent event, String guildId) {
 		final int wert = event.getOption("anzahl", 0L, OptionMapping::getAsLong).intValue();
-		if (wert < 0) {
-			event.replyEmbeds(MessageUtil.error("Die Zahl darf nicht negativ sein. 0 heisst unbegrenzt."))
-					.setEphemeral(true).queue();
+		try {
+			Verwaltung.limitSetzen(guildId, wert);
+		} catch (final Verwaltung.Fehler f) {
+			event.replyEmbeds(MessageUtil.error(f.getMessage())).setEphemeral(true).queue();
 			return;
 		}
-		GuildConfigDao.setGlobalLimit(guildId, wert);
+		Verwaltung.protokoll(event.getGuild(), event.getUser().getId(), "Slash", "Serverlimit = " + wert);
 		event.replyEmbeds(MessageUtil.embed("Gespeichert",
 				wert == 0
 						? "Serverweit gibt es jetzt keine Obergrenze mehr; nur noch die Panel-Limits gelten."
@@ -77,7 +79,8 @@ public class ConfigCommand extends ListenerAdapter {
 		final boolean istRolle = event.getOption("wen").getAsMentionable() instanceof net.dv8tion.jda.api.entities.Role;
 
 		if (entsperren) {
-			Database.update("DELETE FROM blacklist WHERE guild_id = ? AND subject_id = ?", guildId, id);
+			Verwaltung.entsperren(guildId, id);
+			Verwaltung.protokoll(event.getGuild(), event.getUser().getId(), "Slash", "Sperre aufgehoben für " + id);
 			event.replyEmbeds(MessageUtil.embed("Entsperrt",
 					mentionable.getAsMention() + " darf wieder Tickets oeffnen.", 0x1ec45c))
 					.setEphemeral(true).queue();
@@ -85,11 +88,13 @@ public class ConfigCommand extends ListenerAdapter {
 		}
 
 		final String grund = event.getOption("grund", null, OptionMapping::getAsString);
-		Database.update(
-				"INSERT INTO blacklist (guild_id, subject_id, is_role, reason, added_by) "
-						+ "VALUES (?, ?, ?, ?, ?) ON CONFLICT (guild_id, subject_id) "
-						+ "DO UPDATE SET reason = EXCLUDED.reason, added_by = EXCLUDED.added_by",
-				guildId, id, istRolle, grund, event.getUser().getId());
+		try {
+			Verwaltung.sperren(guildId, id, istRolle, grund, event.getUser().getId());
+		} catch (final Verwaltung.Fehler f) {
+			event.replyEmbeds(MessageUtil.error(f.getMessage())).setEphemeral(true).queue();
+			return;
+		}
+		Verwaltung.protokoll(event.getGuild(), event.getUser().getId(), "Slash", "gesperrt: " + id);
 		event.replyEmbeds(MessageUtil.embed("Gesperrt",
 				mentionable.getAsMention() + " kann keine Tickets mehr oeffnen."
 						+ (grund == null ? "" : "\nGrund: " + grund),

@@ -1,5 +1,12 @@
 package ticket;
 
+import db.FrageDao;
+import model.Frage;
+import java.util.HashMap;
+import java.util.Map;
+import net.dv8tion.jda.api.events.interaction.ModalInteractionEvent;
+import net.dv8tion.jda.api.interactions.callbacks.IModalCallback;
+import net.dv8tion.jda.api.interactions.modals.ModalMapping;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -52,7 +59,7 @@ public class TicketInteractions extends ListenerAdapter {
 		final String id = event.getComponentId();
 
 		if (id.startsWith(MenuRenderer.OPEN_PREFIX)) {
-			handleOpen(event, parseId(id, MenuRenderer.OPEN_PREFIX));
+			oeffnenOderFormular(event, parseId(id, MenuRenderer.OPEN_PREFIX));
 		} else if (id.startsWith(DELETE_CONFIRM_PREFIX)) {
 			handleDeleteConfirmed(event, parseId(id, DELETE_CONFIRM_PREFIX));
 		} else if (id.startsWith(DELETE_PREFIX)) {
@@ -82,14 +89,60 @@ public class TicketInteractions extends ListenerAdapter {
 		}
 		// Das Dropdown behaelt sonst die getroffene Auswahl sichtbar stehen.
 		event.getMessage().editMessageComponents(event.getMessage().getComponents()).queue();
-		handleOpen(event, Long.parseLong(value));
+		oeffnenOderFormular(event, Long.parseLong(value));
+	}
+
+	/**
+	 * Hat das Panel Fragen, kommt zuerst das Formular; sonst sofort das Ticket.
+	 *
+	 * Ein Formular muss die ERSTE Antwort auf die Interaktion sein — nach einem
+	 * deferReply geht es nicht mehr. Deshalb wird hier vorab und ohne Thread
+	 * geprüft (ein paar schnelle Datenbankabfragen, weit unter drei Sekunden),
+	 * ob der Klickende überhaupt öffnen darf.
+	 */
+	private <T extends IReplyCallback & IModalCallback> void oeffnenOderFormular(T event, long panelId) {
+		final List<Frage> fragen = FrageDao.vonPanel(panelId);
+		if (fragen.isEmpty()) {
+			handleOpen(event, panelId, List.of());
+			return;
+		}
+		final Guild guild = event.getGuild();
+		final Member member = event.getMember();
+		final Optional<Panel> panel = PanelDao.byId(panelId);
+		if (guild == null || member == null || panel.isEmpty()) {
+			event.replyEmbeds(MessageUtil.error("Dieser Ticket-Typ existiert nicht mehr.")).setEphemeral(true).queue();
+			return;
+		}
+		final Optional<String> nein = TicketService.pruefeOeffnen(guild, panel.get(), member);
+		if (nein.isPresent()) {
+			event.replyEmbeds(MessageUtil.error(nein.get())).setEphemeral(true).queue();
+			return;
+		}
+		event.replyModal(Formular.bauen(panel.get(), fragen)).queue();
+	}
+
+	@Override
+	public void onModalInteraction(@Nonnull ModalInteractionEvent event) {
+		if (!event.getModalId().startsWith(Formular.PREFIX)) {
+			return;
+		}
+		final long panelId = parseId(event.getModalId(), Formular.PREFIX);
+		final List<Frage> fragen = FrageDao.vonPanel(panelId);
+		final Map<String, String> antworten = new HashMap<>();
+		for (int i = 0; i < fragen.size(); i++) {
+			final ModalMapping wert = event.getValue(Formular.feldId(i));
+			if (wert != null) {
+				antworten.put(Formular.feldId(i), wert.getAsString());
+			}
+		}
+		handleOpen(event, panelId, Formular.antwortNachrichten(fragen, antworten));
 	}
 
 	// -----------------------------------------------------------------------
 	// Oeffnen
 	// -----------------------------------------------------------------------
 
-	private void handleOpen(IReplyCallback event, long panelId) {
+	private void handleOpen(IReplyCallback event, long panelId, List<String> formularAntworten) {
 		final Guild guild = event.getGuild();
 		final Member member = event.getMember();
 		if (guild == null || member == null) {
@@ -129,6 +182,10 @@ public class TicketInteractions extends ListenerAdapter {
 			}
 
 			postWelcome(result.channel(), panel, member);
+			// Dieselbe Warteschlange wie die Begrüßung — JDA schickt sie danach.
+			for (final String text : formularAntworten) {
+				result.channel().sendMessage(text).queue();
+			}
 
 			if (panel.dmOnOpen()) {
 				Dm.send(member.getUser(), MessageUtil.embed("Ticket geöffnet",

@@ -57,7 +57,53 @@ class TicketApiServerTest {
 			throw new NoClassDefFoundError("absichtlich");
 		});
 
+		// Ein schreibender Endpunkt, der zurueckgibt, was bei ihm ankam.
+		server.registriere("/api/echo", anfrage -> java.util.Map.of(
+				"methode", anfrage.methode(),
+				"koerper", anfrage.koerper(),
+				"admin", anfrage.websiteAdmin()), true);
+		server.registriere("/api/verboten", anfrage -> {
+			throw new verwaltung.Verwaltung.KeinRecht("nein");
+		}, true);
+
 		client = HttpClient.newBuilder().connectTimeout(GEDULD).build();
+	}
+
+	private HttpResponse<String> post(String pfad, String koerper, String... kopfzeilen) throws Exception {
+		final HttpRequest.Builder b = HttpRequest.newBuilder()
+				.uri(URI.create("http://127.0.0.1:" + port + pfad))
+				.timeout(GEDULD)
+				.header("Authorization", "Bearer geheim").header("X-Discord-User", "1")
+				.POST(HttpRequest.BodyPublishers.ofString(koerper));
+		for (int i = 0; i + 1 < kopfzeilen.length; i += 2) {
+			b.setHeader(kopfzeilen[i], kopfzeilen[i + 1]);
+		}
+		return client.send(b.build(), HttpResponse.BodyHandlers.ofString());
+	}
+
+	@Test
+	@DisplayName("Schreibender Pfad: POST-Koerper kommt als JSON-Objekt an, Admin nur mit Kopfzeile")
+	void postKoerper() throws Exception {
+		HttpResponse<String> r = post("/api/echo", "{\"guild\":\"5\",\"n\":3}");
+		assertEquals(200, r.statusCode(), r.body());
+		assertTrue(r.body().contains("\"guild\":\"5\""));
+		assertTrue(r.body().contains("\"admin\":false"));
+		r = post("/api/echo", "{}", "X-Website-Admin", "1");
+		assertTrue(r.body().contains("\"admin\":true"));
+		r = post("/api/echo", "{}", "X-Website-Admin", "true");
+		assertTrue(r.body().contains("\"admin\":false"), "nur genau \"1\" zaehlt");
+	}
+
+	@Test
+	@DisplayName("Schreibender Pfad: kaputtes JSON 400, zu gross 413, ohne Token 401, kein Recht 403")
+	void postGrenzen() throws Exception {
+		assertEquals(400, post("/api/echo", "[1,2]").statusCode());
+		assertEquals(400, post("/api/echo", "kein json").statusCode());
+		assertEquals(413, post("/api/echo", "{\"x\":\"" + "a".repeat(70_000) + "\"}").statusCode());
+		assertEquals(401, post("/api/echo", "{}", "Authorization", "Bearer falsch").statusCode());
+		final HttpResponse<String> r = post("/api/verboten", "{}");
+		assertEquals(403, r.statusCode());
+		assertTrue(r.body().contains("nein"));
 	}
 
 	@AfterAll

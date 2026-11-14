@@ -16,8 +16,8 @@ import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEve
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.interactions.commands.Command;
 import net.dv8tion.jda.api.interactions.commands.OptionMapping;
-import panel.MenuRenderer;
 import util.MessageUtil;
+import verwaltung.Verwaltung;
 
 /**
  * Verwaltung der Menues — der Nachrichten, ueber die Tickets geoeffnet werden.
@@ -54,12 +54,10 @@ public class MenuCommand extends ListenerAdapter {
 			event.replyEmbeds(MessageUtil.error("Das muss ein Textkanal sein.")).setEphemeral(true).queue();
 			return;
 		}
-		final Menu.Style style = "dropdown".equalsIgnoreCase(
-				event.getOption("stil", "knoepfe", OptionMapping::getAsString))
-						? Menu.Style.SELECT
-						: Menu.Style.BUTTONS;
-
-		final long id = MenuDao.create(guildId, text.getId(), style);
+		final Menu.Style style = Verwaltung.stil(event.getOption("stil", "knoepfe", OptionMapping::getAsString));
+		final long id = Verwaltung.menuErstellen(event.getGuild(), text.getId(), style).id();
+		Verwaltung.protokoll(event.getGuild(), event.getUser().getId(), "Slash",
+				"Menü " + id + " angelegt in #" + text.getName());
 		event.replyEmbeds(MessageUtil.embed("Menü angelegt",
 				"ID **" + id + "** in " + text.getAsMention() + " als "
 						+ (style == Menu.Style.SELECT ? "Dropdown" : "Knopfreihe")
@@ -80,7 +78,13 @@ public class MenuCommand extends ListenerAdapter {
 		final String body = event.getOption("text", "", OptionMapping::getAsString).replace("\\n", "\n");
 		final String placeholder = event.getOption("platzhalter", null, OptionMapping::getAsString);
 
-		MenuDao.setEmbed(menu.id(), title, body, menu.embedColor(), placeholder);
+		try {
+			Verwaltung.menuText(menu, title, body, placeholder, menu.embedColor());
+		} catch (final Verwaltung.Fehler f) {
+			event.replyEmbeds(MessageUtil.error(f.getMessage())).setEphemeral(true).queue();
+			return;
+		}
+		Verwaltung.protokoll(event.getGuild(), event.getUser().getId(), "Slash", "Menü " + menu.id() + ": Text geändert");
 		event.replyEmbeds(MessageUtil.embed("Gespeichert",
 				"Menü " + menu.id() + " beschriftet. Mit `/menu posten` sichtbar machen.",
 				0x1ec45c)).setEphemeral(true).queue();
@@ -104,9 +108,14 @@ public class MenuCommand extends ListenerAdapter {
 		final String label = event.getOption("label", panel.name(), OptionMapping::getAsString);
 		final String emoji = event.getOption("emoji", null, OptionMapping::getAsString);
 		final String description = event.getOption("beschreibung", null, OptionMapping::getAsString);
-		final int position = MenuDao.entries(menu.id()).size();
-
-		MenuDao.addEntry(menu.id(), panel.id(), label, description, emoji, 2, position);
+		try {
+			Verwaltung.menuEintrag(menu, panel, label, emoji, description, null, null);
+		} catch (final Verwaltung.Fehler f) {
+			event.replyEmbeds(MessageUtil.error(f.getMessage())).setEphemeral(true).queue();
+			return;
+		}
+		Verwaltung.protokoll(event.getGuild(), event.getUser().getId(), "Slash",
+				"Menü " + menu.id() + ": Panel „" + panel.name() + "“ als „" + label + "“ eingetragen");
 		event.replyEmbeds(MessageUtil.embed("Hinzugefügt",
 				"`" + panel.name() + "` erscheint als **" + label + "** in Menü " + menu.id()
 						+ ".\nMit `/menu posten` übernehmen.",
@@ -125,7 +134,9 @@ public class MenuCommand extends ListenerAdapter {
 					.setEphemeral(true).queue();
 			return;
 		}
-		MenuDao.removeEntry(maybeMenu.get().id(), maybePanel.get().id());
+		Verwaltung.menuEintragEntfernen(maybeMenu.get(), maybePanel.get());
+		Verwaltung.protokoll(event.getGuild(), event.getUser().getId(), "Slash",
+				"Menü " + maybeMenu.get().id() + ": Panel „" + panelName + "“ entfernt");
 		event.replyEmbeds(MessageUtil.embed("Entfernt",
 				"`" + panelName + "` wird nicht mehr angeboten. Das Panel und seine Tickets bleiben "
 						+ "unangetastet.\nMit `/menu posten` übernehmen.",
@@ -138,22 +149,23 @@ public class MenuCommand extends ListenerAdapter {
 			return;
 		}
 		final Menu menu = maybe.get();
-		final TextChannel channel = event.getGuild().getTextChannelById(menu.channelId());
-		if (channel == null) {
-			event.replyEmbeds(MessageUtil.error("Der Kanal des Menüs existiert nicht mehr."))
-					.setEphemeral(true).queue();
-			return;
-		}
-		if (MenuDao.entries(menu.id()).isEmpty()) {
-			event.replyEmbeds(MessageUtil.error("Das Menü hat noch kein Panel — `/menu hinzufuegen` zuerst."))
-					.setEphemeral(true).queue();
-			return;
-		}
-
-		MenuRenderer.postOrUpdate(channel, menu);
-		event.replyEmbeds(MessageUtil.embed("Gepostet",
-				"Menü " + menu.id() + " steht in " + channel.getAsMention() + ".",
-				0x1ec45c)).setEphemeral(true).queue();
+		final var guild = event.getGuild();
+		final String userId = event.getUser().getId();
+		// Posten wartet auf Discord — deshalb erst quittieren und dann im
+		// eigenen Thread, erst im Callback (sonst 10062 Unknown interaction).
+		event.deferReply(true).queue(hook -> new Thread(() -> {
+			try {
+				Verwaltung.menuPosten(guild, menu);
+				Verwaltung.protokoll(guild, userId, "Slash", "Menü " + menu.id() + " gepostet/abgeglichen");
+				hook.editOriginalEmbeds(MessageUtil.embed("Gepostet",
+						"Menü " + menu.id() + " steht in <#" + menu.channelId() + ">.", 0x1ec45c)).queue();
+			} catch (final Verwaltung.Fehler f) {
+				hook.editOriginalEmbeds(MessageUtil.error(f.getMessage())).queue();
+			} catch (final RuntimeException e) {
+				System.err.println("Menü " + menu.id() + " konnte nicht gepostet werden: " + e);
+				hook.editOriginalEmbeds(MessageUtil.error("Posten fehlgeschlagen: " + e.getMessage())).queue();
+			}
+		}, "menu-posten-" + menu.id()).start());
 	}
 
 	private void list(SlashCommandInteractionEvent event, String guildId) {

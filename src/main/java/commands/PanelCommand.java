@@ -13,6 +13,7 @@ import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.interactions.commands.Command;
 import net.dv8tion.jda.api.interactions.commands.OptionMapping;
 import util.MessageUtil;
+import verwaltung.Verwaltung;
 
 /**
  * Verwaltung der Panels — also der Ticket-Typen.
@@ -86,19 +87,17 @@ public class PanelCommand extends ListenerAdapter {
 	}
 
 	private void create(SlashCommandInteractionEvent event, String guildId) {
-		final String name = event.getOption("name", "", OptionMapping::getAsString).trim();
-		if (name.isEmpty()) {
-			event.replyEmbeds(MessageUtil.error("Der Name darf nicht leer sein.")).setEphemeral(true).queue();
+		final Panel panel;
+		try {
+			panel = Verwaltung.panelErstellen(guildId, event.getOption("name", "", OptionMapping::getAsString));
+		} catch (final Verwaltung.Fehler f) {
+			event.replyEmbeds(MessageUtil.error(f.getMessage())).setEphemeral(true).queue();
 			return;
 		}
-		if (PanelDao.byName(guildId, name).isPresent()) {
-			event.replyEmbeds(MessageUtil.error("Ein Panel namens `" + name + "` gibt es schon."))
-					.setEphemeral(true).queue();
-			return;
-		}
-		final long id = PanelDao.create(guildId, name);
+		Verwaltung.protokoll(event.getGuild(), event.getUser().getId(), "Slash",
+				"Panel „" + panel.name() + "“ angelegt (ID " + panel.id() + ")");
 		event.replyEmbeds(MessageUtil.embed("Panel angelegt",
-				"`" + name + "` (ID " + id + ")\n\nJetzt mit `/panel setzen` konfigurieren und mit "
+				"`" + panel.name() + "` (ID " + panel.id() + ")\n\nJetzt mit `/panel setzen` konfigurieren und mit "
 						+ "`/menu hinzufuegen` in ein Menü hängen.",
 				0x1ec45c)).setEphemeral(true).queue();
 	}
@@ -158,36 +157,20 @@ public class PanelCommand extends ListenerAdapter {
 			return;
 		}
 		final Panel panel = maybe.get();
-
-		final Optional<Field> field = Field.of(event.getOption("feld", "", OptionMapping::getAsString));
-		if (field.isEmpty()) {
-			event.replyEmbeds(MessageUtil.error("Unbekanntes Feld.")).setEphemeral(true).queue();
-			return;
-		}
-		final String raw = event.getOption("wert", "", OptionMapping::getAsString).trim();
-
 		final Object value;
+		final Field field;
 		try {
-			value = switch (field.get().kind) {
-				case NUMBER -> Integer.parseInt(raw);
-				case BOOL -> parseBool(raw);
-				case TEXT -> raw.isEmpty() || "-".equals(raw) ? null : raw;
-			};
-		} catch (final IllegalArgumentException e) {
-			event.replyEmbeds(MessageUtil.error(
-					"`" + raw + "` passt nicht zum Feld " + field.get().name().toLowerCase()
-							+ ". Erwartet: " + switch (field.get().kind) {
-								case NUMBER -> "eine Zahl";
-								case BOOL -> "ja oder nein";
-								case TEXT -> "Text";
-							}))
-					.setEphemeral(true).queue();
+			field = Verwaltung.feld(event.getOption("feld", "", OptionMapping::getAsString));
+			value = Verwaltung.panelFeldSetzen(event.getGuild(), panel, field,
+					event.getOption("wert", "", OptionMapping::getAsString));
+		} catch (final Verwaltung.Fehler f) {
+			event.replyEmbeds(MessageUtil.error(f.getMessage())).setEphemeral(true).queue();
 			return;
 		}
-
-		PanelDao.set(panel.id(), field.get().column, value);
+		Verwaltung.protokoll(event.getGuild(), event.getUser().getId(), "Slash",
+				"Panel „" + panel.name() + "“: " + field.name().toLowerCase() + " = " + (value == null ? "—" : value));
 		event.replyEmbeds(MessageUtil.embed("Gespeichert",
-				"`" + panel.name() + "` · " + field.get().name().toLowerCase() + " = `"
+				"`" + panel.name() + "` · " + field.name().toLowerCase() + " = `"
 						+ (value == null ? "—" : value) + "`",
 				0x1ec45c)).setEphemeral(true).queue();
 	}
@@ -202,11 +185,15 @@ public class PanelCommand extends ListenerAdapter {
 		final String kind = event.getOption("art", "support", OptionMapping::getAsString);
 		final boolean remove = event.getOption("entfernen", false, OptionMapping::getAsBoolean);
 
-		if (remove) {
-			PanelDao.removeRole(panel.id(), role.getId(), kind);
-		} else {
-			PanelDao.addRole(panel.id(), role.getId(), kind);
+		try {
+			Verwaltung.panelRolle(event.getGuild(), panel, role.getId(), kind, remove);
+		} catch (final Verwaltung.Fehler f) {
+			event.replyEmbeds(MessageUtil.error(f.getMessage())).setEphemeral(true).queue();
+			return;
 		}
+		Verwaltung.protokoll(event.getGuild(), event.getUser().getId(), "Slash",
+				"Panel „" + panel.name() + "“: Rolle " + role.getName() + " (" + kind + ") "
+						+ (remove ? "entfernt" : "hinzugefügt"));
 		event.replyEmbeds(MessageUtil.embed("Gespeichert",
 				role.getAsMention() + (remove ? " entfernt von " : " hinzugefügt zu ") + "`" + panel.name()
 						+ "` (" + kind + ")",
@@ -223,14 +210,6 @@ public class PanelCommand extends ListenerAdapter {
 					.setEphemeral(true).queue();
 		}
 		return panel;
-	}
-
-	private static boolean parseBool(String raw) {
-		return switch (raw.toLowerCase()) {
-			case "ja", "true", "an", "1" -> true;
-			case "nein", "false", "aus", "0" -> false;
-			default -> throw new IllegalArgumentException(raw);
-		};
 	}
 
 	private static String orDash(String value) {

@@ -56,6 +56,26 @@ public final class MenuDao {
 				menuId, panelId, label, description, emoji, buttonStyle, position);
 	}
 
+	public static void setStyle(long menuId, Menu.Style style) {
+		Database.update("UPDATE menus SET style = ? WHERE id = ?", style.dbValue(), menuId);
+	}
+
+	/** Zieht ein Menü in einen anderen Kanal um; es gilt danach als nie gepostet. */
+	public static void setChannel(long menuId, String channelId) {
+		Database.update("UPDATE menus SET channel_id = ?, message_id = NULL WHERE id = ?", channelId, menuId);
+	}
+
+	/** Löscht ein Menü samt Einträgen. Panels und Tickets bleiben unberührt. */
+	public static void delete(long menuId) {
+		Database.update("DELETE FROM menus WHERE id = ?", menuId);
+	}
+
+	public static List<Menu> withPanel(long panelId) {
+		return Database.query(
+				"SELECT m.* FROM menus m JOIN menu_entries e ON e.menu_id = m.id WHERE e.panel_id = ? ORDER BY m.id",
+				Menu::from, panelId);
+	}
+
 	/** Nimmt ein Panel aus dem Menue, ohne es oder seine Tickets anzutasten. */
 	public static void removeEntry(long menuId, long panelId) {
 		Database.update("DELETE FROM menu_entries WHERE menu_id = ? AND panel_id = ?", menuId, panelId);
