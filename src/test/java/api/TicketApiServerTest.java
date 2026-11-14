@@ -106,6 +106,37 @@ class TicketApiServerTest {
 		assertTrue(r.body().contains("nein"));
 	}
 
+	@Test
+	@DisplayName("Die API lauscht nur auf der Schleife, nicht im Heimnetz")
+	void lauschtNurAufDerSchleife() throws Exception {
+		java.net.InetAddress fremd = null;
+		for (final java.net.NetworkInterface ni : java.util.Collections
+				.list(java.net.NetworkInterface.getNetworkInterfaces())) {
+			if (!ni.isUp() || ni.isLoopback()) {
+				continue;
+			}
+			for (final java.net.InetAddress a : java.util.Collections.list(ni.getInetAddresses())) {
+				if (a instanceof java.net.Inet4Address && !a.isLoopbackAddress()) {
+					fremd = a;
+				}
+			}
+		}
+		org.junit.jupiter.api.Assumptions.assumeTrue(fremd != null, "keine zweite Netzadresse auf dieser Maschine");
+
+		// Ueber die Schleife antwortet sie ...
+		try (java.net.Socket s = new java.net.Socket()) {
+			s.connect(new java.net.InetSocketAddress("127.0.0.1", port), 2000);
+			assertTrue(s.isConnected());
+		}
+		// ... ueber die Netzadresse derselben Maschine nimmt niemand ab.
+		final java.net.InetAddress ziel = fremd;
+		org.junit.jupiter.api.Assertions.assertThrows(java.net.ConnectException.class, () -> {
+			try (java.net.Socket s = new java.net.Socket()) {
+				s.connect(new java.net.InetSocketAddress(ziel, port), 2000);
+			}
+		}, "Die API war ueber " + fremd.getHostAddress() + " erreichbar");
+	}
+
 	@AfterAll
 	void tearDown() {
 		if (server != null) {

@@ -2,6 +2,7 @@ package api;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
@@ -41,7 +42,15 @@ public class TicketApiServer {
 	}
 
 	public void start() throws IOException {
-		server = HttpServer.create(new InetSocketAddress(port), 0);
+		// Nur auf der Schleife lauschen: das Website-Backend, die Wache und der
+		// Bericht fragen alle ueber 127.0.0.1. Ohne Adresse band der Server an
+		// alle Schnittstellen und war damit im Heimnetz und ueber die globale
+		// IPv6-Adresse erreichbar — nur das Token stand noch davor.
+		// TICKETBOT_API_BIND=0.0.0.0 stellt das alte Verhalten wieder her.
+		final String bind = System.getenv("TICKETBOT_API_BIND");
+		final InetAddress adresse = bind == null || bind.isBlank() ? InetAddress.getLoopbackAddress()
+				: InetAddress.getByName(bind.trim());
+		server = HttpServer.create(new InetSocketAddress(adresse, port), 0);
 		registriere("/api/tickets", TicketEndpoints::tickets);
 		registriere("/api/panels", TicketEndpoints::panels);
 		registriere("/api/guilds", TicketEndpoints::guilds);
@@ -59,7 +68,7 @@ public class TicketApiServer {
 		// ersten.
 		server.setExecutor(Executors.newFixedThreadPool(8));
 		server.start();
-		System.out.println("Dashboard-API laeuft auf Port " + port);
+		System.out.println("Dashboard-API laeuft auf " + adresse.getHostAddress() + ":" + port);
 	}
 
 	/**
