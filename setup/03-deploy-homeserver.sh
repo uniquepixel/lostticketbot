@@ -112,6 +112,9 @@ ExecStart=/usr/bin/java -Xmx512m -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 \
     -Dstderr.encoding=UTF-8 -jar %h/lostticketbot/ticketbot.jar
 Restart=always
 RestartSec=10
+# Die JVM endet auf SIGTERM mit 143 – das ist ein sauberes Stoppen, kein Fehler
+# (wie bei den anderen Bots). Restart=always startet trotzdem bei jedem Ende neu.
+SuccessExitStatus=143
 
 [Install]
 WantedBy=default.target
