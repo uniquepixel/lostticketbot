@@ -3,6 +3,7 @@ package transcript;
 import java.io.InputStream;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -139,11 +140,21 @@ public class TranscriptRecorder extends ListenerAdapter {
 		}
 
 		for (final Attachment attachment : attachments) {
-			try (InputStream in = attachment.getProxy().download().join()) {
-				final Message stored = storage
-						.sendMessage("Ticket " + ticketId + " · " + attachment.getFileName())
-						.addFiles(FileUpload.fromData(in, attachment.getFileName()))
-						.complete();
+			try {
+				// Herunterladen und Hochladen zusammen wiederholen: ein Aussetzer
+				// mittendrin laesst sonst einen halb gelesenen Strom zurueck. Die
+				// Datenbankzeile kommt erst danach, damit ein Fehler dort keinen
+				// zweiten Storage-Post ausloest.
+				final Message stored = mitWiederholung(
+						"Anhang '" + attachment.getFileName() + "' aus Ticket " + ticketId,
+						WIEDERHOLUNG_PAUSEN_MS, () -> {
+							try (InputStream in = attachment.getProxy().download().join()) {
+								return storage
+										.sendMessage("Ticket " + ticketId + " · " + attachment.getFileName())
+										.addFiles(FileUpload.fromData(in, attachment.getFileName()))
+										.complete();
+							}
+						});
 
 				final var storedAttachment = stored.getAttachments().isEmpty()
 						? null
@@ -164,6 +175,37 @@ public class TranscriptRecorder extends ListenerAdapter {
 				// laut loggen, weitermachen.
 				System.err.println("Anhang '" + attachment.getFileName() + "' aus Ticket " + ticketId
 						+ " konnte nicht gesichert werden: " + e);
+			}
+		}
+	}
+
+	/**
+	 * Pausen zwischen den Versuchen beim Spiegeln eines Anhangs. Anlass: drei
+	 * Anhaenge (Tickets 319, 427, 460) gingen zwischen September und November
+	 * an je einem einzelnen Netzaussetzer verloren (Timeout, Stream-Reset).
+	 * Die signierte Adresse gilt noch rund einen Tag - ein zweiter Versuch
+	 * Sekunden spaeter haette jeden davon gerettet.
+	 */
+	static final long[] WIEDERHOLUNG_PAUSEN_MS = { 5_000, 30_000 };
+
+	/**
+	 * Fuehrt {@code aufgabe} aus und wiederholt sie nach jeder Pause in
+	 * {@code pausenMs}, solange sie scheitert. Insgesamt also hoechstens
+	 * {@code pausenMs.length + 1} Versuche; der letzte Fehler wird geworfen.
+	 * Ein {@code Error} wird nicht wiederholt (siehe CLAUDE.md: Error ist keine
+	 * Exception) und geht unveraendert durch.
+	 */
+	static <T> T mitWiederholung(String was, long[] pausenMs, Callable<T> aufgabe) throws Exception {
+		for (int versuch = 0;; versuch++) {
+			try {
+				return aufgabe.call();
+			} catch (final Exception e) {
+				if (versuch >= pausenMs.length) {
+					throw e;
+				}
+				System.err.println(was + ": Versuch " + (versuch + 1) + " gescheitert (" + e
+						+ "), neuer Versuch in " + (pausenMs[versuch] / 1000) + " s.");
+				Thread.sleep(pausenMs[versuch]);
 			}
 		}
 	}
