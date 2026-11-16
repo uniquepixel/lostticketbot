@@ -51,7 +51,9 @@ else
     # n Bytes, der Erzeuger bekommt SIGPIPE, und unter "pipefail" gilt das als
     # Fehler - das hat hier schon zweimal das ganze Skript beendet.
     NEW_PASSWORD=$(openssl rand -hex 24)
-    sudo -u postgres psql -qc "CREATE ROLE ${DB_USER} LOGIN PASSWORD '${NEW_PASSWORD}';"
+    # Passwort ueber stdin, nicht als Argument: sudo protokolliert die ganze
+    # Kommandozeile nach auth.log und ins Journal.
+    printf "CREATE ROLE %s LOGIN PASSWORD '%s';\n" "$DB_USER" "$NEW_PASSWORD" | sudo -u postgres psql -qX
     echo "    Rolle '${DB_USER}' angelegt."
 fi
 
