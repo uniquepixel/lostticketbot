@@ -118,7 +118,7 @@ public class Bot extends ListenerAdapter {
 				// Claude Sachen nurnoch Lost Manager"); Klingel.java bleibt nur fuer
 				// ihre Tests und als Vorlage stehen.
 				.addEventListeners(new Bot(), new TicketInteractions(), new TranscriptRecorder(),
-						new TicketKanalWaechter(),
+						new TicketKanalWaechter(), new spielerkarte.SpielerkartenListener(),
 						new PanelCommand(), new MenuCommand(), new LegacyCommand(), new TicketCommand(), new ConfigCommand(), new AdoptCommand(), new TranscriptCommand())
 				.build();
 
