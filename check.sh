@@ -191,6 +191,26 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Kanalzahl je Server
+#
+# Discord erlaubt 500 Kanäle je Server (Kategorien zählen mit). Um den
+# 20.10.2026 stand LOST Family an der Grenze: drei Aufstiegstickets scheiterten
+# still, die Orga löschte am 21.10. 53 Kanäle. Ab 470 wird es eng.
+# ---------------------------------------------------------------------------
+titel "Kanäle je Server (Discord-Grenze 500)"
+if [ -n "${TK}" ]; then
+    for g in 733857906117574717:LOST-Family 1108449987827876022:LOST-Bewerbungen; do
+        N=$(curl -s -m 10 -H "Authorization: Bot ${TK}" "https://discord.com/api/v10/guilds/${g%%:*}/channels" \
+            | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' 2>/dev/null)
+        HINWEIS=""
+        [ -n "${N}" ] && [ "${N}" -ge 470 ] && HINWEIS="  <- eng, Tickets scheitern bei 500"
+        printf '  %-18s %s / 500%s\n' "${g#*:}" "${N:-unbekannt}" "${HINWEIS}"
+    done
+else
+    echo "  übersprungen (kein Bot-Token gefunden)"
+fi
+
+# ---------------------------------------------------------------------------
 # Rueckweg und Platz
 # ---------------------------------------------------------------------------
 titel "Umfeld"

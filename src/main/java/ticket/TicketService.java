@@ -14,6 +14,8 @@ import db.TicketDao;
 import model.GuildConfig;
 import model.Panel;
 import model.Ticket;
+import net.dv8tion.jda.api.exceptions.ErrorResponseException;
+import net.dv8tion.jda.api.requests.ErrorResponse;
 import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
@@ -82,7 +84,15 @@ public final class TicketService {
 		} catch (final RuntimeException e) {
 			// Der Zähler bleibt verbraucht. Das ist Absicht: eine Lücke in der
 			// Nummernfolge ist harmlos, eine doppelt vergebene Nummer nicht.
-			return OpenResult.fail("Der Kanal konnte nicht angelegt werden: " + e.getMessage());
+			//
+			// Bis zum 16.11.2026 sah diesen Fehler nur der Klickende. Im Oktober
+			// stand LOST Family an Discords Grenze von 500 Kanälen, drei
+			// Aufstiegstickets (Lost 5, Nummern 92–94) scheiterten, und davon
+			// blieb nichts übrig als die Lücke in der Nummernfolge. Die Zeile
+			// trifft jetzt Journal, Log-Kanal und damit die Wache.
+			System.err.println("Ticket konnte nicht angelegt werden (" + panel.name() + " #" + number
+					+ ", " + opener.getUser().getName() + "): " + e);
+			return OpenResult.fail(fehlertextAnlegen(e));
 		}
 
 		final long ticketId = TicketDao.create(guildId, panel.id(), number,
@@ -91,6 +101,16 @@ public final class TicketService {
 				() -> new Database.DatabaseException("Ticket " + ticketId + " direkt nach dem Anlegen weg", null));
 
 		return new OpenResult(ticket, channel, null);
+	}
+
+	/** Was der Klickende liest, wenn Discord den Kanal verweigert. */
+	static String fehlertextAnlegen(RuntimeException e) {
+		if (e instanceof final ErrorResponseException ere
+				&& ere.getErrorResponse() == ErrorResponse.MAX_CHANNELS) {
+			return "Der Server hat Discords Höchstzahl von 500 Kanälen erreicht, deshalb kann gerade "
+					+ "kein Ticket angelegt werden. Bitte gib der Orga Bescheid.";
+		}
+		return "Der Kanal konnte nicht angelegt werden: " + e.getMessage();
 	}
 
 	/**

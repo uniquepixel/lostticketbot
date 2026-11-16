@@ -115,6 +115,8 @@ public class TicketInteractions extends ListenerAdapter {
 		}
 		final Optional<String> nein = TicketService.pruefeOeffnen(guild, panel.get(), member);
 		if (nein.isPresent()) {
+			System.out.println("Ticket-Öffnung abgelehnt (" + panel.get().name() + ", "
+					+ member.getUser().getName() + ", vor dem Formular): " + nein.get());
 			event.replyEmbeds(MessageUtil.error(nein.get())).setEphemeral(true).queue();
 			return;
 		}
@@ -177,6 +179,11 @@ public class TicketInteractions extends ListenerAdapter {
 			}
 
 			if (!result.ok()) {
+				// Auch Ablehnungen (Limit, Sperrliste) gehören ins Protokoll — sonst
+				// lässt sich später nicht beantworten, warum jemand kein Ticket bekam.
+				// Bewusst ohne die Wörter, auf die die Wache ruft.
+				System.out.println("Ticket-Öffnung abgelehnt (" + panel.name() + ", "
+						+ member.getUser().getName() + "): " + result.error());
 				event.getHook().editOriginalEmbeds(MessageUtil.error(result.error())).queue();
 				return;
 			}
