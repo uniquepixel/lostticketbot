@@ -200,8 +200,14 @@ fi
 titel "Kanäle je Server (Discord-Grenze 500)"
 if [ -n "${TK}" ]; then
     for g in 733857906117574717:LOST-Family 1108449987827876022:LOST-Bewerbungen; do
-        N=$(curl -s -m 10 -H "Authorization: Bot ${TK}" "https://discord.com/api/v10/guilds/${g%%:*}/channels" \
-            | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' 2>/dev/null)
+        # LOST Family braucht hier 10-13 s (17.11.2026 gemessen) - mit 10 s stand
+        # dort "unbekannt". Deshalb 25 s und ein zweiter Versuch, wie in wache.sh.
+        N=""
+        for _versuch in 1 2; do
+            N=$(curl -s -m 25 -H "Authorization: Bot ${TK}" "https://discord.com/api/v10/guilds/${g%%:*}/channels" \
+                | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' 2>/dev/null)
+            [ -n "${N}" ] && break
+        done
         HINWEIS=""
         [ -n "${N}" ] && [ "${N}" -ge 470 ] && HINWEIS="  <- eng, Tickets scheitern bei 500"
         printf '  %-18s %s / 500%s\n' "${g#*:}" "${N:-unbekannt}" "${HINWEIS}"
