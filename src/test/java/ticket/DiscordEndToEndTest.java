@@ -184,6 +184,24 @@ class DiscordEndToEndTest {
 
 		TicketService.close(guild, ticket, panel, guild.getSelfMember().getId(), "Test");
 
+		// close() wartet per complete() auf Discords REST-Antwort, der JDA-Cache
+		// zieht aber erst mit dem Gateway-Ereignis nach. Ohne dieses Warten las
+		// der Test gelegentlich den alten Stand (11.09. und 17.11.2026 rot).
+		for (int versuch = 0; versuch < 40; versuch++) {
+			final TextChannel k = guild.getTextChannelById(kanalId);
+			final PermissionOverride o = k == null ? null : k.getPermissionOverride(guild.getSelfMember());
+			if (k != null && "e2e-closed-0041".equals(k.getName()) && o != null
+					&& o.getDenied().contains(Permission.MESSAGE_SEND)) {
+				break;
+			}
+			try {
+				Thread.sleep(250);
+			} catch (final InterruptedException e) {
+				Thread.currentThread().interrupt();
+				break;
+			}
+		}
+
 		final TextChannel kanal = guild.getTextChannelById(kanalId);
 		assertNotNull(kanal);
 		assertEquals("e2e-closed-0041", kanal.getName());
