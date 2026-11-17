@@ -58,6 +58,8 @@ class ArchivAktualitaetTest {
 	private void aufraeumen() {
 		Database.update("DELETE FROM transcript_archives WHERE ticket_id IN "
 				+ "(SELECT id FROM tickets WHERE guild_id = ?)", GUILD);
+		Database.update("DELETE FROM ticket_attachments WHERE ticket_id IN "
+				+ "(SELECT id FROM tickets WHERE guild_id = ?)", GUILD);
 		Database.update("DELETE FROM ticket_messages WHERE ticket_id IN "
 				+ "(SELECT id FROM tickets WHERE guild_id = ?)", GUILD);
 		Database.update("DELETE FROM tickets WHERE guild_id = ?", GUILD);
@@ -71,6 +73,17 @@ class ArchivAktualitaetTest {
 						+ "author_bot, content, sent_at) VALUES (?, ?, '222', 'tester', false, 'text', "
 						+ "CURRENT_TIMESTAMP + INTERVAL '" + versatz + "')",
 				ticketId, id);
+	}
+
+	/** Eine Bot-Nachricht, wie sie der Mitschnitt speichert. */
+	private long botNachricht(String id, String inhalt, String versatz) {
+		Database.update(
+				"INSERT INTO ticket_messages (ticket_id, message_id, author_id, author_name, "
+						+ "author_bot, content, sent_at) VALUES (?, ?, '333', 'bot', true, ?, "
+						+ "CURRENT_TIMESTAMP + INTERVAL '" + versatz + "')",
+				ticketId, id, inhalt);
+		return Database.queryOne("SELECT id FROM ticket_messages WHERE ticket_id = ? AND message_id = ?",
+				rs -> rs.getLong(1), ticketId, id).orElseThrow();
 	}
 
 	private void archivieren(String versatz) {
@@ -126,5 +139,40 @@ class ArchivAktualitaetTest {
 		archivieren("-1 minute");
 		assertTrue(TranscriptArchiver.archivIstAktuell(ticketId),
 				"Nichts aufgezeichnet heißt: nichts fehlt");
+	}
+
+	@Test
+	@DisplayName("Leeres Bot-Embed nach dem Schließen macht das Archiv nicht lückenhaft")
+	void leeresBotEmbedNachArchiv() {
+		Database.update("DELETE FROM ticket_messages WHERE ticket_id = ?", ticketId);
+		nachricht("m1", "-10 minutes");
+		archivieren("-5 minutes");
+		// Das Knopf-Embed, das der Bot gleich nach dem Archivieren postet.
+		botNachricht("b1", "", "-299 seconds");
+		botNachricht("b2", null, "-298 seconds");
+
+		assertTrue(TranscriptArchiver.archivIstAktuell(ticketId),
+				"Im Archiv stuende davon nur eine leere Zeile — kein Grund, neu zu schreiben");
+	}
+
+	@Test
+	@DisplayName("Bot-Nachricht mit Text oder Anhang nach dem Archivieren zählt weiter")
+	void botMitInhaltNachArchiv() {
+		Database.update("DELETE FROM ticket_messages WHERE ticket_id = ?", ticketId);
+		nachricht("m1", "-10 minutes");
+		archivieren("-5 minutes");
+		botNachricht("b1", "Formularantwort", "-1 minute");
+		assertFalse(TranscriptArchiver.archivIstAktuell(ticketId), "Bot-Text gehoert ins Archiv");
+
+		Database.update("DELETE FROM ticket_messages WHERE ticket_id = ?", ticketId);
+		nachricht("m1", "-10 minutes");
+		final long mit = botNachricht("b2", "", "-1 minute");
+		Database.update(
+				"INSERT INTO ticket_attachments (ticket_id, ticket_message_id, filename, "
+						+ "storage_channel_id, storage_message_id, storage_attach_id) "
+						+ "VALUES (?, ?, 'bild.png', '1', '2', '3')",
+				ticketId, mit);
+		assertFalse(TranscriptArchiver.archivIstAktuell(ticketId),
+				"Ein Anhang ohne Text gehoert ins Archiv");
 	}
 }

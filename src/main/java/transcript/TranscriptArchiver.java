@@ -61,13 +61,23 @@ public final class TranscriptArchiver {
 	 * Schliesszeitpunkt kennt diese spaeteren Nachrichten nicht. Solange der
 	 * Kanal steht, faellt das nicht auf; wird er geloescht, waeren sie nur noch
 	 * in der Datenbank, und die ist ausdruecklich der wegwerfbare Teil.
+	 *
+	 * Nicht mit zaehlt eine Bot-Nachricht ohne Text und ohne Anhang: das ist das
+	 * Embed mit den Knoepfen, das der Bot eine Sekunde NACH dem Archivieren ins
+	 * geschlossene Ticket stellt. Im Archiv stuende davon nur eine leere Zeile.
+	 * Bis 17.11.2026 zaehlte es mit, und so schrieb jedes Loeschen eines
+	 * geschlossenen Tickets das Archiv ein zweites Mal (151 von 175 Faellen) —
+	 * der erste Post blieb als Doppel im Storage-Kanal liegen.
 	 */
 	static boolean archivIstAktuell(long ticketId) {
 		return Database.count(
 				"SELECT COUNT(*) FROM transcript_archives a "
 						+ "WHERE a.ticket_id = ? AND NOT EXISTS ("
 						+ "  SELECT 1 FROM ticket_messages m "
-						+ "  WHERE m.ticket_id = a.ticket_id AND m.sent_at > a.archived_at)",
+						+ "  WHERE m.ticket_id = a.ticket_id AND m.sent_at > a.archived_at "
+						+ "  AND NOT (m.author_bot AND COALESCE(m.content, '') = '' "
+						+ "    AND NOT EXISTS (SELECT 1 FROM ticket_attachments t "
+						+ "                    WHERE t.ticket_message_id = m.id)))",
 				ticketId) > 0;
 	}
 
@@ -264,7 +274,11 @@ public final class TranscriptArchiver {
 					"INSERT INTO transcript_archives (ticket_id, storage_channel_id, storage_message_id) "
 							+ "VALUES (?, ?, ?) ON CONFLICT (ticket_id) DO UPDATE "
 							+ "SET storage_channel_id = EXCLUDED.storage_channel_id, "
-							+ "storage_message_id = EXCLUDED.storage_message_id",
+							+ "storage_message_id = EXCLUDED.storage_message_id, "
+							// Sonst bliebe der Zeitpunkt des ERSTEN Archivs stehen, und
+							// nach Wiedereroeffnen und erneutem Schliessen galte das
+							// neue Archiv faelschlich als lueckenhaft.
+							+ "archived_at = CURRENT_TIMESTAMP",
 					ticket.id(), storage.getId(), posted.getId());
 
 			return posted.getId();
