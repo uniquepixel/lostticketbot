@@ -1,8 +1,12 @@
 package transcript;
 
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -12,12 +16,16 @@ import javax.annotation.Nonnull;
 import db.Database;
 import lostticketbot.Bot;
 import model.Ticket;
+import net.dv8tion.jda.api.JDA;
+import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.entities.Message.Attachment;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.events.message.MessageDeleteEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.events.message.MessageUpdateEvent;
+import net.dv8tion.jda.api.events.session.ReadyEvent;
+import net.dv8tion.jda.api.events.session.SessionRecreateEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.utils.FileUpload;
 import db.TicketDao;
@@ -48,6 +56,16 @@ public class TranscriptRecorder extends ListenerAdapter {
 		return t;
 	});
 
+	/**
+	 * Eigener Faden fuer das Nachholen: es liest je Ticketkanal den ganzen
+	 * Verlauf und hat im Gateway-Thread nichts verloren.
+	 */
+	private static final ExecutorService NACHHOLEN = Executors.newSingleThreadExecutor(r -> {
+		final Thread t = new Thread(r, "verlauf-nachholen");
+		t.setDaemon(true);
+		return t;
+	});
+
 	@Override
 	public void onMessageReceived(@Nonnull MessageReceivedEvent event) {
 		if (!event.isFromGuild()) {
@@ -57,10 +75,15 @@ public class TranscriptRecorder extends ListenerAdapter {
 		if (ticket.isEmpty()) {
 			return;
 		}
+		erfasse(ticket.get().id(), event.getMessage());
+	}
 
-		final Message message = event.getMessage();
-		final long ticketId = ticket.get().id();
-
+	/**
+	 * Schreibt eine Nachricht in den Verlauf und spiegelt ihre Anhaenge.
+	 *
+	 * @return true, wenn die Nachricht neu war
+	 */
+	boolean erfasse(long ticketId, Message message) {
 		final long rowId;
 		try {
 			rowId = Database.insertIgnoringConflict(
@@ -77,14 +100,15 @@ public class TranscriptRecorder extends ListenerAdapter {
 					java.sql.Timestamp.from(message.getTimeCreated().toInstant()));
 		} catch (final RuntimeException e) {
 			System.err.println("Transcript-Zeile konnte nicht geschrieben werden: " + e.getMessage());
-			return;
+			return false;
 		}
 
 		// 0 heisst: die Nachricht war schon erfasst (Wiederverbindung des
-		// Gateways kann eine Nachricht erneut liefern). Dann auch die Anhaenge
-		// nicht ein zweites Mal spiegeln.
+		// Gateways kann eine Nachricht erneut liefern, und das Nachholen laeuft
+		// neben dem Betrieb). Dann auch die Anhaenge nicht ein zweites Mal
+		// spiegeln.
 		if (rowId == 0L) {
-			return;
+			return false;
 		}
 
 		final int attachmentCount = message.getAttachments().size();
@@ -96,6 +120,95 @@ public class TranscriptRecorder extends ListenerAdapter {
 			// Genau das hat den ersten fehlgeschlagenen Spiegelversuch verborgen.
 			MIRROR.execute(() -> mirrorAttachments(ticketId, rowId, message.getAttachments()));
 		}
+		return true;
+	}
+
+	// -----------------------------------------------------------------------
+	// Nachholen, was geschrieben wurde, waehrend der Bot nicht zuhoerte
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Beim Start: jeden Ticketkanal gegen die Datenbank abgleichen.
+	 *
+	 * Anlass: in der Nacht zum 19.11.2026 stand der Server elf Stunden. Was in
+	 * dieser Zeit in Tickets geschrieben wurde, kam nie als Event an und fehlte
+	 * danach im Verlauf - und damit spaeter im Archiv, das nur aus der
+	 * Datenbank gebaut wird. Dasselbe gilt im Kleinen fuer jeden Neustart und
+	 * fuer uebernommene Tickets, deren Verlauf vor der Uebernahme liegt.
+	 */
+	@Override
+	public void onReady(@Nonnull ReadyEvent event) {
+		nachholenAnstossen(event.getJDA());
+	}
+
+	/**
+	 * Baut das Gateway die Sitzung neu auf (statt sie fortzusetzen), liefert
+	 * Discord die Events der Luecke nicht nach.
+	 */
+	@Override
+	public void onSessionRecreate(@Nonnull SessionRecreateEvent event) {
+		nachholenAnstossen(event.getJDA());
+	}
+
+	private void nachholenAnstossen(JDA jda) {
+		NACHHOLEN.execute(() -> {
+			for (final Guild guild : jda.getGuilds()) {
+				try {
+					nachholen(guild);
+				} catch (final RuntimeException e) {
+					System.err.println("Verlauf nachholen auf " + guild.getName() + " gescheitert: " + e);
+				}
+			}
+		});
+	}
+
+	/**
+	 * Traegt fuer jedes nicht geloeschte Ticket des Servers nach, was im Kanal
+	 * steht und in der Datenbank fehlt. Je Server, damit ein Test nur den
+	 * Testserver durchgehen kann.
+	 *
+	 * Nur Fehlendes: Bearbeitungen und Loeschungen aus der Luecke bleiben
+	 * unbemerkt, der bereits erfasste Text wird nie ueberschrieben.
+	 *
+	 * @return Zahl der nachgetragenen Nachrichten
+	 */
+	int nachholen(Guild guild) {
+		int gesamt = 0;
+		for (final Ticket ticket : TicketDao.nichtGeloescht(guild.getId())) {
+			final TextChannel kanal = guild.getTextChannelById(ticket.channelId());
+			if (kanal == null) {
+				// Kanal weg: das ist Sache des TicketKanalWaechters.
+				continue;
+			}
+			try {
+				final Set<String> bekannt = new HashSet<>(Database.query(
+						"SELECT message_id FROM ticket_messages WHERE ticket_id = ?",
+						rs -> rs.getString(1), ticket.id()));
+				final List<Message> fehlend = new ArrayList<>();
+				for (final Message message : kanal.getIterableHistory()) {
+					if (!bekannt.contains(message.getId())) {
+						fehlend.add(message);
+					}
+				}
+				// Der Verlauf kommt neueste zuerst; eingetragen wird in der
+				// Reihenfolge, in der geschrieben wurde.
+				Collections.reverse(fehlend);
+				int neu = 0;
+				for (final Message message : fehlend) {
+					if (erfasse(ticket.id(), message)) {
+						neu++;
+					}
+				}
+				if (neu > 0) {
+					System.out.println("Ticket " + ticket.id() + " (" + ticket.channelName() + "): "
+							+ neu + " Nachricht(en) nachgetragen, die der Bot nicht mitbekommen hatte.");
+				}
+				gesamt += neu;
+			} catch (final RuntimeException e) {
+				System.err.println("Verlauf von Ticket " + ticket.id() + " nicht nachholbar: " + e);
+			}
+		}
+		return gesamt;
 	}
 
 	@Override
