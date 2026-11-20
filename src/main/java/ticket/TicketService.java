@@ -48,6 +48,30 @@ public final class TicketService {
 	private TicketService() {
 	}
 
+	/**
+	 * Sperren gegen den Doppelklick.
+	 *
+	 * Öffnen prüft erst das Limit und legt dann an; Schließen prüft erst den
+	 * Status und archiviert dann. Zwei Klicks im selben Augenblick liefen beide
+	 * durch die Prüfung — zwei Tickets bzw. zwei Archive und zwei
+	 * Schließnachrichten. Bis zum 20.11.2026 kam das in den Daten nicht vor,
+	 * die engsten Paare lagen 36 s auseinander; ausgeschlossen war es nicht.
+	 *
+	 * Gestreift statt je Schlüssel ein eigenes Objekt: die Menge bleibt fest,
+	 * und dass zwei fremde Nutzer sich selten kurz gegenseitig warten lassen,
+	 * kostet nichts. Gilt nur innerhalb dieses Prozesses — es gibt nur einen.
+	 */
+	private static final Object[] SPERREN = new Object[64];
+	static {
+		for (int i = 0; i < SPERREN.length; i++) {
+			SPERREN[i] = new Object();
+		}
+	}
+
+	static Object sperre(String schluessel) {
+		return SPERREN[Math.floorMod(schluessel.hashCode(), SPERREN.length)];
+	}
+
 	/** Ergebnis eines Öffnungsversuchs — entweder ein Ticket oder ein Grund, warum nicht. */
 	public record OpenResult(Ticket ticket, TextChannel channel, String error) {
 		public boolean ok() {
@@ -64,6 +88,15 @@ public final class TicketService {
 	// -----------------------------------------------------------------------
 
 	public static OpenResult open(Guild guild, Panel panel, Member opener) {
+		// Prüfung und Anlegen am Stück je Nutzer und Server — siehe SPERREN.
+		// Der zweite Klick wartet, bis die Datenbankzeile des ersten steht, und
+		// scheitert dann am Limit wie jeder spätere Versuch.
+		synchronized (sperre("oeffnen:" + guild.getId() + ":" + opener.getId())) {
+			return openGesperrt(guild, panel, opener);
+		}
+	}
+
+	private static OpenResult openGesperrt(Guild guild, Panel panel, Member opener) {
 		final String guildId = guild.getId();
 		final String userId = opener.getId();
 
@@ -261,7 +294,27 @@ public final class TicketService {
 	// Schließen und wieder öffnen
 	// -----------------------------------------------------------------------
 
-	public static void close(Guild guild, Ticket ticket, Panel panel, String closedBy, String reason) {
+	/**
+	 * Schließt das Ticket, sofern es noch offen ist.
+	 *
+	 * @return {@code false}, wenn es inzwischen schon geschlossen (oder
+	 *         gelöscht) war — dann ist nichts geschehen, und der Aufrufer darf
+	 *         weder archivieren noch eine Schließnachricht posten.
+	 */
+	public static boolean close(Guild guild, Ticket ticket, Panel panel, String closedBy, String reason) {
+		synchronized (sperre("ticket:" + ticket.id())) {
+			// Erst unter der Sperre nachsehen: der Stand des Aufrufers kann
+			// von vor dem anderen Klick sein.
+			final Optional<Ticket> aktuell = TicketDao.byId(ticket.id());
+			if (aktuell.isEmpty() || !aktuell.get().isOpen()) {
+				return false;
+			}
+			closeGesperrt(guild, ticket, panel, closedBy, reason);
+			return true;
+		}
+	}
+
+	private static void closeGesperrt(Guild guild, Ticket ticket, Panel panel, String closedBy, String reason) {
 		final TextChannel channel = guild.getTextChannelById(ticket.channelId());
 		final String newName = panel.renderName(true, ticket.number(), null);
 

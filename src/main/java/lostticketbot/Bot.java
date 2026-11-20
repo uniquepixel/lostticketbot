@@ -215,7 +215,9 @@ public class Bot extends ListenerAdapter {
 							channel.sendMessage(panel.ownerLeaveMessage()).complete();
 						}
 					}
-					TicketService.close(guild, ticket, panel, null, "Eroeffner hat den Server verlassen");
+					if (!TicketService.close(guild, ticket, panel, null, "Eroeffner hat den Server verlassen")) {
+						continue;
+					}
 					TicketDao.byId(ticket.id()).ifPresent(closed -> {
 						TranscriptArchiver.archive(guild, closed, panel, null);
 						// Auch hier die Schliessnachricht: gerade bei einem

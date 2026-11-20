@@ -400,6 +400,63 @@ class DiscordEndToEndTest {
 	}
 
 	@Test
+	@Order(8)
+	@DisplayName("Doppelklick: zwei gleichzeitige Oeffnungen ergeben ein Ticket, zwei Schliessungen ein Schliessen")
+	void doppelklick() throws Exception {
+		final Panel panel = PanelDao.byId(panelId).orElseThrow();
+		final Member ich = guild.getSelfMember();
+		assertEquals(0, TicketDao.countOpenByOwnerAndPanel(panelId, ich.getId()),
+				"Vorbedingung: kein offenes Ticket dieses Panels");
+
+		final java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+		final java.util.List<TextChannel> angelegt = new java.util.ArrayList<>();
+		try {
+			final java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+			final java.util.concurrent.Callable<TicketService.OpenResult> klick = () -> {
+				start.await();
+				return TicketService.open(guild, panel, ich);
+			};
+			final var a = pool.submit(klick);
+			final var b = pool.submit(klick);
+			start.countDown();
+			final TicketService.OpenResult ra = a.get(60, java.util.concurrent.TimeUnit.SECONDS);
+			final TicketService.OpenResult rb = b.get(60, java.util.concurrent.TimeUnit.SECONDS);
+			for (final TicketService.OpenResult r : List.of(ra, rb)) {
+				if (r.ok()) {
+					angelegt.add(r.channel());
+				}
+			}
+			assertEquals(1, angelegt.size(), "Genau ein Klick darf ein Ticket anlegen");
+			assertEquals(1, TicketDao.countOpenByOwnerAndPanel(panelId, ich.getId()));
+
+			final Ticket ticket = TicketDao.byChannel(angelegt.get(0).getId()).orElseThrow();
+			final java.util.concurrent.CountDownLatch start2 = new java.util.concurrent.CountDownLatch(1);
+			final java.util.concurrent.Callable<Boolean> zu = () -> {
+				start2.await();
+				// Beide mit dem Stand von vor dem Klick, wie in handleCloseConfirmed.
+				return TicketService.close(guild, ticket, panel, ich.getId(), "Doppelklick-Test");
+			};
+			final var c = pool.submit(zu);
+			final var d = pool.submit(zu);
+			start2.countDown();
+			final boolean rc = c.get(60, java.util.concurrent.TimeUnit.SECONDS);
+			final boolean rd = d.get(60, java.util.concurrent.TimeUnit.SECONDS);
+			assertTrue(rc ^ rd, "Genau ein Klick darf schliessen (war " + rc + "/" + rd + ")");
+			assertFalse(TicketDao.byId(ticket.id()).orElseThrow().isOpen());
+		} finally {
+			pool.shutdownNow();
+			for (final TextChannel k : angelegt) {
+				final Optional<Ticket> t = TicketDao.byChannel(k.getId());
+				final TextChannel noch = guild.getTextChannelById(k.getId());
+				if (noch != null) {
+					noch.delete().complete();
+				}
+				t.ifPresent(x -> Database.update("DELETE FROM tickets WHERE id = ?", x.id()));
+			}
+		}
+	}
+
+	@Test
 	@Order(99)
 	@DisplayName("Die Willkommensnachricht traegt die Anweisung an den Eroeffner")
 	void willkommensnachricht() {

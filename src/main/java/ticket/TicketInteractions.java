@@ -188,7 +188,13 @@ public class TicketInteractions extends ListenerAdapter {
 				return;
 			}
 
-			postWelcome(result.channel(), panel, member);
+			try {
+				postWelcome(result.channel(), panel, member);
+			} catch (final RuntimeException e) {
+				// Das Ticket steht; ohne diesen Fang hinge nur die Antwort an
+				// den Klickenden für immer auf "denkt nach".
+				System.err.println("Begrüßung in " + result.channel().getName() + " fehlgeschlagen: " + e);
+			}
 			// Dieselbe Warteschlange wie die Begrüßung — JDA schickt sie danach.
 			for (final String text : formularAntworten) {
 				result.channel().sendMessage(text).queue();
@@ -323,7 +329,12 @@ public class TicketInteractions extends ListenerAdapter {
 			}
 
 			try {
-				TicketService.close(guild, ticket, panel.get(), closer.getId(), null);
+				if (!TicketService.close(guild, ticket, panel.get(), closer.getId(), null)) {
+					// Ein zweiter Klick auf "Ja, schließen", während der erste lief.
+					event.getHook().editOriginal("Dieses Ticket ist bereits geschlossen.")
+							.setComponents(List.of()).queue();
+					return;
+				}
 				// Nach dem Schliessen neu laden: der Kanalname hat sich geaendert,
 				// und genau der soll im Archiv und im Log stehen.
 				TicketDao.byId(ticketId).ifPresent(closed -> {
