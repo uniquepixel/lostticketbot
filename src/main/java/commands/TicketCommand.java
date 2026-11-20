@@ -250,11 +250,28 @@ public class TicketCommand extends ListenerAdapter {
 				.formatted(panelName, ticket.number(), ticket.ownerId(),
 						ticket.claimedBy() == null ? "niemand" : "<@" + ticket.claimedBy() + ">",
 						ticket.status().name().toLowerCase(),
-						ticket.openedAt(),
+						zeitpunkt(ticket.openedAt()),
 						members.isEmpty() ? "niemand"
 								: String.join(", ", members.stream().map(m -> "<@" + m + ">").toList()));
 
 		event.replyEmbeds(MessageUtil.embed("Ticket " + ticket.channelName(), text, 0x1ec45c))
 				.setEphemeral(true).queue();
+	}
+
+	/**
+	 * Discord-Zeitstempel statt roher {@code LocalDateTime} ("2026-11-20T09:15:17.123").
+	 *
+	 * {@code opened_at} ist {@code TIMESTAMP} ohne Zone; geschrieben wird es per
+	 * {@code CURRENT_TIMESTAMP} in der Zone der Sitzung, und die setzt pgjdbc auf
+	 * die Zone der JVM. Gelesen wird ueber {@code getTimestamp} ebenfalls in der
+	 * JVM-Zone — deshalb hier {@code systemDefault()}, dann stimmt der Augenblick.
+	 * Discord zeigt ihn jedem in seiner eigenen Zeitzone an.
+	 */
+	static String zeitpunkt(java.time.LocalDateTime wann) {
+		if (wann == null) {
+			return "—";
+		}
+		final long sekunden = wann.atZone(java.time.ZoneId.systemDefault()).toEpochSecond();
+		return "<t:" + sekunden + ":f> (<t:" + sekunden + ":R>)";
 	}
 }
