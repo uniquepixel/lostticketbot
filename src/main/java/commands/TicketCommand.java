@@ -163,6 +163,16 @@ public class TicketCommand extends ListenerAdapter {
 	}
 
 	private void reopen(SlashCommandInteractionEvent event, Ticket ticket) {
+		// Dieselbe Regel wie am Knopf „Wieder öffnen“ in TicketInteractions.
+		// Ohne sie konnte jeder, der im geschlossenen Kanal noch schreiben
+		// darf (per /ticket hinzufuegen Dazugeholte behalten ihr Schreibrecht),
+		// das Ticket am Team vorbei wieder aufmachen.
+		if (!Visibility.darfVerwalten(event.getGuild(), ticket, event.getMember())) {
+			event.replyEmbeds(MessageUtil.error(
+					"Tickets wieder öffnen darf nur das Team dieses Bereichs."))
+					.setEphemeral(true).queue();
+			return;
+		}
 		if (ticket.isOpen()) {
 			event.replyEmbeds(MessageUtil.error("Dieses Ticket ist bereits offen."))
 					.setEphemeral(true).queue();
