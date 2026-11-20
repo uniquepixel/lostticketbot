@@ -265,6 +265,20 @@ public final class TicketEndpoints {
 		final Map<String, Object> antwort = new LinkedHashMap<>();
 		antwort.put("ticket", kopf);
 		antwort.put("messages", verlauf);
+
+		// Namen zu den Erwaehnungen im Verlauf, damit die Website nicht nur
+		// Nummern zeigt. Aus dem Cache, also ohne Aufruf zu Discord.
+		final List<String> texte = new ArrayList<>();
+		for (final Map<String, Object> m : verlauf) {
+			texte.add((String) m.get("content"));
+		}
+		final Guild g = Bot.jda() == null ? null : Bot.jda().getGuildById(ticket.guildId());
+		antwort.put("names", ErwaehnteNamen.aufloesen(texte,
+				id -> name(ticket.guildId(), id),
+				id -> {
+					final net.dv8tion.jda.api.entities.Role r = g == null ? null : g.getRoleById(id);
+					return r == null ? null : r.getName();
+				}));
 		return antwort;
 	}
 
