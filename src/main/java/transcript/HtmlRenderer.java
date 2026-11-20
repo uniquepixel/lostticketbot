@@ -1,6 +1,7 @@
 package transcript;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -37,6 +38,9 @@ import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 public final class HtmlRenderer {
 
 	private static final DateTimeFormatter ZEIT = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm");
+
+	/** In dieser Zone stehen die Uhrzeiten in der Datei. */
+	private static final ZoneId ANZEIGE = ZoneId.of("Europe/Berlin");
 
 	/**
 	 * Wie viel eingebettetes Bildmaterial die Datei hoechstens tragen darf.
@@ -282,7 +286,17 @@ public final class HtmlRenderer {
 	}
 
 	private static String zeit(LocalDateTime t) {
-		return t == null ? "—" : ZEIT.format(t);
+		return zeit(t, ZoneId.systemDefault());
+	}
+
+	/**
+	 * Die Datenbank fuehrt Zeiten ohne Zone, in der Zone des Bots — auf dem
+	 * Server ist das UTC. Lesen tut die Datei aber das Team, und das lebt in
+	 * deutscher Zeit: unumgerechnet stand jede Uhrzeit eine Stunde (im Sommer
+	 * zwei) zu frueh im Transcript, ohne dass irgendwo "UTC" dabeistand.
+	 */
+	static String zeit(LocalDateTime t, ZoneId quelle) {
+		return t == null ? "—" : ZEIT.format(t.atZone(quelle).withZoneSameInstant(ANZEIGE));
 	}
 
 	private static String groesse(long bytes) {
