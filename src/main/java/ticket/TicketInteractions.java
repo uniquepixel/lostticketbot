@@ -360,7 +360,7 @@ public class TicketInteractions extends ListenerAdapter {
 				? "Automatisch geschlossen"
 				: "Geschlossen von <@" + closerId + ">";
 
-		channel.sendMessageEmbeds(MessageUtil.embed("Ticket geschlossen",
+		channel.sendMessageEmbeds(MessageUtil.embed(TranscriptArchiver.SCHLIESSNACHRICHT_TITEL,
 				von + ".\n\nDer Verlauf ist gesichert. **Löschen** entfernt den Kanal endgültig — "
 						+ "das Transcript bleibt auch danach abrufbar.",
 				config.ticketEmbedColor()))

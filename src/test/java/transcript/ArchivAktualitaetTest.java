@@ -156,6 +156,27 @@ class ArchivAktualitaetTest {
 	}
 
 	@Test
+	@DisplayName("Die Schließnachricht mit Embed zählt nicht, das Embed eines anderen Bots nach dem Schließen schon")
+	void embedNachArchiv() {
+		Database.update("DELETE FROM ticket_messages WHERE ticket_id = ?", ticketId);
+		nachricht("m1", "-10 minutes");
+		archivieren("-5 minutes");
+		final long schliess = botNachricht("b1", "", "-299 seconds");
+		Database.update("UPDATE ticket_messages SET embeds_json = CAST(? AS jsonb) WHERE id = ?",
+				"[{\"title\":\"" + TranscriptArchiver.SCHLIESSNACHRICHT_TITEL
+						+ "\",\"description\":\"Geschlossen von <@1>.\"}]",
+				schliess);
+		assertTrue(TranscriptArchiver.archivIstAktuell(ticketId),
+				"Die eigene Schließnachricht darf kein zweites Archiv auslösen");
+
+		final long auskunft = botNachricht("b2", "", "-1 minute");
+		Database.update("UPDATE ticket_messages SET embeds_json = CAST(? AS jsonb) WHERE id = ?",
+				"[{\"title\":\"Spielerauskunft\",\"description\":\"Rathaus 16\"}]", auskunft);
+		assertFalse(TranscriptArchiver.archivIstAktuell(ticketId),
+				"Die Auskunft eines Bots nach dem Schließen steht in keinem Archiv");
+	}
+
+	@Test
 	@DisplayName("Bot-Nachricht mit Text oder Anhang nach dem Archivieren zählt weiter")
 	void botMitInhaltNachArchiv() {
 		Database.update("DELETE FROM ticket_messages WHERE ticket_id = ?", ticketId);

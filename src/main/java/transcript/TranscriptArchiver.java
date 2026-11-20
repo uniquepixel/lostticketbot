@@ -30,6 +30,9 @@ public final class TranscriptArchiver {
 
 	private static final ObjectMapper JSON = new ObjectMapper();
 
+	/** Titel des Embeds, das der Bot ins geschlossene Ticket stellt — siehe {@link #archivIstAktuell}. */
+	public static final String SCHLIESSNACHRICHT_TITEL = "Ticket geschlossen";
+
 	private TranscriptArchiver() {
 	}
 
@@ -68,6 +71,11 @@ public final class TranscriptArchiver {
 	 * Bis 17.11.2026 zaehlte es mit, und so schrieb jedes Loeschen eines
 	 * geschlossenen Tickets das Archiv ein zweites Mal (151 von 175 Faellen) —
 	 * der erste Post blieb als Doppel im Storage-Kanal liegen.
+	 *
+	 * Seit 20.11.2026 stehen Embeds im Verlauf. Die Ausnahme gilt seitdem nur
+	 * noch fuer genau diese Schliessnachricht (und fuer Zeilen ohne Embed):
+	 * schickt ein anderer Bot nach dem Schliessen eine Auskunft als Embed,
+	 * gehoert die ins Archiv.
 	 */
 	static boolean archivIstAktuell(long ticketId) {
 		return Database.count(
@@ -76,9 +84,10 @@ public final class TranscriptArchiver {
 						+ "  SELECT 1 FROM ticket_messages m "
 						+ "  WHERE m.ticket_id = a.ticket_id AND m.sent_at > a.archived_at "
 						+ "  AND NOT (m.author_bot AND COALESCE(m.content, '') = '' "
+						+ "    AND (m.embeds_json IS NULL OR m.embeds_json->0->>'title' = ?) "
 						+ "    AND NOT EXISTS (SELECT 1 FROM ticket_attachments t "
 						+ "                    WHERE t.ticket_message_id = m.id)))",
-				ticketId) > 0;
+				ticketId, SCHLIESSNACHRICHT_TITEL) > 0;
 	}
 
 	/**
