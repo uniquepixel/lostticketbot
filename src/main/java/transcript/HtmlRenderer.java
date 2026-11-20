@@ -56,7 +56,8 @@ public final class HtmlRenderer {
 	}
 
 	private record Zeile(long id, String autorId, String autorName, boolean bot, String inhalt,
-			LocalDateTime gesendet, boolean bearbeitet, boolean geloescht) {
+			List<Einbettungen.Einbettung> embeds, LocalDateTime gesendet, boolean bearbeitet,
+			boolean geloescht) {
 	}
 
 	private record Anhang(String dateiname, String contentType, long groesse,
@@ -144,6 +145,9 @@ public final class HtmlRenderer {
 			if (z.inhalt() != null && !z.inhalt().isBlank()) {
 				h.append("<div class=\"text\">").append(inhaltFormatieren(z.inhalt())).append("</div>\n");
 			}
+			for (final Einbettungen.Einbettung e : z.embeds()) {
+				h.append(embedHtml(e));
+			}
 			if (z.bearbeitet()) {
 				h.append("<span class=\"marke\">bearbeitet</span>\n");
 			}
@@ -191,6 +195,7 @@ public final class HtmlRenderer {
 						rs.getString("author_name"),
 						rs.getBoolean("author_bot"),
 						rs.getString("content"),
+						Einbettungen.lesen(rs.getString("embeds_json")),
 						rs.getTimestamp("sent_at").toLocalDateTime(),
 						rs.getTimestamp("edited_at") != null,
 						rs.getTimestamp("deleted_at") != null),
@@ -309,6 +314,51 @@ public final class HtmlRenderer {
 		return String.format("%.1f MB", bytes / 1024.0 / 1024.0);
 	}
 
+	/**
+	 * Ein Embed als Kasten: Autor, Titel, Text, Felder, Fusszeile.
+	 *
+	 * Bilder eines Embeds werden nur verlinkt, nicht eingebunden: sie liegen
+	 * bei fremden Bots auf fremden Servern und sind nicht gespiegelt.
+	 */
+	static String embedHtml(Einbettungen.Einbettung e) {
+		final StringBuilder h = new StringBuilder("<div class=\"embed\">\n");
+		if (e.autor() != null) {
+			h.append("<div class=\"e-autor\">").append(esc(e.autor())).append("</div>\n");
+		}
+		if (e.titel() != null) {
+			h.append("<div class=\"e-titel\">");
+			if (istWebadresse(e.url())) {
+				h.append("<a href=\"").append(esc(e.url())).append("\" target=\"_blank\" rel=\"noopener\">")
+						.append(esc(e.titel())).append("</a>");
+			} else {
+				h.append(esc(e.titel()));
+			}
+			h.append("</div>\n");
+		}
+		if (e.text() != null) {
+			h.append("<div class=\"text\">").append(inhaltFormatieren(e.text())).append("</div>\n");
+		}
+		for (final Einbettungen.Feld f : e.felder()) {
+			h.append("<div class=\"e-feld\"><b>").append(esc(f.name())).append("</b><div class=\"text\">")
+					.append(f.wert() == null ? "" : inhaltFormatieren(f.wert())).append("</div></div>\n");
+		}
+		for (final String bild : new String[] { e.bild(), e.vorschaubild() }) {
+			if (istWebadresse(bild)) {
+				h.append("<a class=\"anhang\" href=\"").append(esc(bild))
+						.append("\" target=\"_blank\" rel=\"noopener\">Bild im Embed</a>\n");
+			}
+		}
+		if (e.fusszeile() != null) {
+			h.append("<div class=\"e-fuss\">").append(esc(e.fusszeile())).append("</div>\n");
+		}
+		return h.append("</div>\n").toString();
+	}
+
+	/** Nur http(s) wird zum Link — kein {@code javascript:} aus einem fremden Embed. */
+	private static boolean istWebadresse(String url) {
+		return url != null && (url.startsWith("https://") || url.startsWith("http://"));
+	}
+
 	/** Erwaehnungen sichtbar machen und Zeilenumbrueche erhalten. */
 	private static String inhaltFormatieren(String roh) {
 		return esc(roh)
@@ -363,6 +413,15 @@ public final class HtmlRenderer {
 			time { font-size:.75rem; color:var(--leise) }
 			.text { white-space:normal; overflow-wrap:anywhere }
 			.erw { color:var(--gruen); font-weight:500 }
+			.embed { margin-top:.35rem; padding:.5rem .7rem; border:1px solid var(--linie);
+			  border-left:3px solid var(--gruen); border-radius:4px; background:var(--grund);
+			  max-width:34rem; font-size:.9rem }
+			.e-autor, .e-fuss { font-size:.75rem; color:var(--leise) }
+			.e-titel { font-weight:600; margin:.1rem 0 }
+			.e-titel a { color:inherit }
+			.e-feld { margin-top:.4rem }
+			.e-feld b { font-size:.8rem }
+			.e-fuss { margin-top:.4rem }
 			.marke { display:inline-block; font-size:.68rem; color:var(--leise);
 			  text-transform:uppercase; letter-spacing:.06em; margin-top:.2rem }
 			.marke.rot { color:var(--rot) }

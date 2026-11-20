@@ -246,6 +246,8 @@ public final class TicketEndpoints {
 					String.valueOf(a.get("filename"))));
 		}
 
+		// Auch in Embeds stehen Erwaehnungen ("Geschlossen von <@…>").
+		final List<String> embedTexte = new ArrayList<>();
 		final List<Map<String, Object>> verlauf = Database.query(
 				"SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY sent_at, id",
 				rs -> {
@@ -255,6 +257,11 @@ public final class TicketEndpoints {
 					m.put("author_name", rs.getString("author_name"));
 					m.put("bot", rs.getBoolean("author_bot"));
 					m.put("content", rs.getString("content"));
+					final var embeds = transcript.Einbettungen.alsKnoten(rs.getString("embeds_json"));
+					if (embeds != null) {
+						m.put("embeds", embeds);
+						embedTexte.add(embeds.toString());
+					}
 					m.put("sent_at", String.valueOf(rs.getTimestamp("sent_at")));
 					m.put("edited", rs.getTimestamp("edited_at") != null);
 					m.put("deleted", rs.getTimestamp("deleted_at") != null);
@@ -272,6 +279,7 @@ public final class TicketEndpoints {
 		for (final Map<String, Object> m : verlauf) {
 			texte.add((String) m.get("content"));
 		}
+		texte.addAll(embedTexte);
 		final Guild g = Bot.jda() == null ? null : Bot.jda().getGuildById(ticket.guildId());
 		antwort.put("names", ErwaehnteNamen.aufloesen(texte,
 				id -> name(ticket.guildId(), id),

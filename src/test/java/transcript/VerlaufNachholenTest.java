@@ -124,6 +124,78 @@ class VerlaufNachholenTest {
 		assertEquals(3, verlauf(ticketId).size(), "Der zweite Abgleich hat Nachrichten doppelt eingetragen");
 	}
 
+	@Test
+	@DisplayName("Embeds stehen im Verlauf, werden bei alten Zeilen nachgetragen, und eine falsche Bearbeitet-Marke fällt weg")
+	void embedsWerdenErfasstUndNachgetragen() {
+		final TextChannel eigener = guild.createTextChannel("nachhol-0002").setParent(kategorie).complete();
+		try {
+			final long ticketId = TicketDao.create(guild.getId(), panelId, 2, eigener.getId(),
+					eigener.getName(), guild.getSelfMember().getId());
+			final TranscriptRecorder recorder = new TranscriptRecorder();
+
+			final Message embed = eigener.sendMessageEmbeds(new net.dv8tion.jda.api.EmbedBuilder()
+					.setTitle("Spielerauskunft")
+					.setDescription("Rathaus 16")
+					.addField("Clan", "LOST 4", false)
+					.setFooter("Stand heute")
+					.build()).complete();
+			final Message text = eigener.sendMessage("nur Text").complete();
+
+			// Der laufende Bot schreibt mit; erst abwarten, dann die Zeilen
+			// selbst anlegen, damit der Stand hier nicht von seiner Fassung
+			// abhaengt.
+			schlafe(2500);
+			Database.update("DELETE FROM ticket_messages WHERE ticket_id = ?", ticketId);
+			recorder.erfasse(ticketId, embed);
+			recorder.erfasse(ticketId, text);
+
+			final String erfasst = embedsJson(ticketId, embed.getId());
+			assertNotNull(erfasst, "Das Embed wurde nicht mitgeschrieben");
+			final List<Einbettungen.Einbettung> gelesen = Einbettungen.lesen(erfasst);
+			assertEquals(1, gelesen.size());
+			assertEquals("Spielerauskunft", gelesen.get(0).titel());
+			assertEquals("Rathaus 16", gelesen.get(0).text());
+			assertEquals("LOST 4", gelesen.get(0).felder().get(0).wert());
+			assertEquals("Stand heute", gelesen.get(0).fusszeile());
+			assertEquals(null, embedsJson(ticketId, text.getId()), "Eine Nachricht ohne Embed bekommt keins");
+
+			// Der Altbestand: Zeile ohne Embeds, dazu faelschlich "bearbeitet".
+			Database.update("UPDATE ticket_messages SET embeds_json = NULL, edited_at = CURRENT_TIMESTAMP "
+					+ "WHERE ticket_id = ?", ticketId);
+			recorder.nachholen(guild);
+			assertNotNull(embedsJson(ticketId, embed.getId()), "Der Abgleich hat das Embed nicht nachgetragen");
+			assertEquals(0, Database.count(
+					"SELECT COUNT(*) FROM ticket_messages WHERE ticket_id = ? AND edited_at IS NOT NULL", ticketId),
+					"Die falsche Bearbeitet-Marke steht noch");
+			assertEquals(2, verlauf(ticketId).size(), "Der Abgleich hat Zeilen verdoppelt oder verloren");
+
+			// Ein Update ohne echte Bearbeitung (so kommt die Linkvorschau an)
+			// aendert die Marke nicht, eine echte Bearbeitung setzt sie und
+			// zieht Text und Embed nach.
+			recorder.aktualisiere(text);
+			assertEquals(0, Database.count(
+					"SELECT COUNT(*) FROM ticket_messages WHERE ticket_id = ? AND edited_at IS NOT NULL", ticketId));
+			final Message geaendert = embed.editMessageEmbeds(new net.dv8tion.jda.api.EmbedBuilder()
+					.setTitle("Spielerauskunft").setDescription("Rathaus 17").build()).complete();
+			recorder.aktualisiere(geaendert);
+			assertEquals("Rathaus 17", Einbettungen.lesen(embedsJson(ticketId, embed.getId())).get(0).text());
+			assertEquals(1, Database.count(
+					"SELECT COUNT(*) FROM ticket_messages WHERE ticket_id = ? AND edited_at IS NOT NULL", ticketId));
+
+			// Und es kommt im Transcript an.
+			final String html = HtmlRenderer.embedHtml(Einbettungen.lesen(embedsJson(ticketId, embed.getId())).get(0));
+			org.junit.jupiter.api.Assertions.assertTrue(html.contains("Rathaus 17"));
+		} finally {
+			eigener.delete().complete();
+		}
+	}
+
+	private static String embedsJson(long ticketId, String messageId) {
+		return Database.query(
+				"SELECT embeds_json FROM ticket_messages WHERE ticket_id = ? AND message_id = ?",
+				rs -> rs.getString(1), ticketId, messageId).get(0);
+	}
+
 	private static void schlafe(long ms) {
 		try {
 			Thread.sleep(ms);

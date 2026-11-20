@@ -88,8 +88,8 @@ public class TranscriptRecorder extends ListenerAdapter {
 		try {
 			rowId = Database.insertIgnoringConflict(
 					"INSERT INTO ticket_messages "
-							+ "(ticket_id, message_id, author_id, author_name, author_bot, content, sent_at) "
-							+ "VALUES (?, ?, ?, ?, ?, ?, ?) "
+							+ "(ticket_id, message_id, author_id, author_name, author_bot, content, embeds_json, sent_at) "
+							+ "VALUES (?, ?, ?, ?, ?, ?, CAST(? AS jsonb), ?) "
 							+ "ON CONFLICT (ticket_id, message_id) DO NOTHING",
 					ticketId,
 					message.getId(),
@@ -97,6 +97,7 @@ public class TranscriptRecorder extends ListenerAdapter {
 					message.getAuthor().getName(),
 					message.getAuthor().isBot(),
 					message.getContentRaw(),
+					embedsVon(message),
 					java.sql.Timestamp.from(message.getTimeCreated().toInstant()));
 		} catch (final RuntimeException e) {
 			System.err.println("Transcript-Zeile konnte nicht geschrieben werden: " + e.getMessage());
@@ -168,7 +169,9 @@ public class TranscriptRecorder extends ListenerAdapter {
 	 * Testserver durchgehen kann.
 	 *
 	 * Nur Fehlendes: Bearbeitungen und Loeschungen aus der Luecke bleiben
-	 * unbemerkt, der bereits erfasste Text wird nie ueberschrieben.
+	 * unbemerkt, der bereits erfasste Text wird nie ueberschrieben. Ergaenzt
+	 * werden allein fehlende Embeds, und eine falsche "bearbeitet"-Marke
+	 * faellt weg.
 	 *
 	 * @return Zahl der nachgetragenen Nachrichten
 	 */
@@ -184,11 +187,41 @@ public class TranscriptRecorder extends ListenerAdapter {
 				final Set<String> bekannt = new HashSet<>(Database.query(
 						"SELECT message_id FROM ticket_messages WHERE ticket_id = ?",
 						rs -> rs.getString(1), ticket.id()));
+				// Erfasste Zeilen, an denen noch etwas nachzuziehen sein koennte:
+				// ohne Embeds (vor dem 20.11.2026 wurden keine mitgeschrieben)
+				// oder als bearbeitet gefuehrt (bis dahin auch nach einer blossen
+				// Linkvorschau).
+				final Set<String> ohneEmbeds = new HashSet<>(Database.query(
+						"SELECT message_id FROM ticket_messages WHERE ticket_id = ? AND embeds_json IS NULL",
+						rs -> rs.getString(1), ticket.id()));
+				final Set<String> alsBearbeitet = new HashSet<>(Database.query(
+						"SELECT message_id FROM ticket_messages WHERE ticket_id = ? AND edited_at IS NOT NULL",
+						rs -> rs.getString(1), ticket.id()));
 				final List<Message> fehlend = new ArrayList<>();
+				int ergaenzt = 0;
 				for (final Message message : kanal.getIterableHistory()) {
 					if (!bekannt.contains(message.getId())) {
 						fehlend.add(message);
+						continue;
 					}
+					if (ohneEmbeds.contains(message.getId())) {
+						final String embeds = embedsVon(message);
+						if (embeds != null) {
+							ergaenzt += Database.update(
+									"UPDATE ticket_messages SET embeds_json = CAST(? AS jsonb) "
+											+ "WHERE ticket_id = ? AND message_id = ? AND embeds_json IS NULL",
+									embeds, ticket.id(), message.getId());
+						}
+					}
+					if (alsBearbeitet.contains(message.getId()) && !message.isEdited()) {
+						Database.update(
+								"UPDATE ticket_messages SET edited_at = NULL WHERE ticket_id = ? AND message_id = ?",
+								ticket.id(), message.getId());
+					}
+				}
+				if (ergaenzt > 0) {
+					System.out.println("Ticket " + ticket.id() + " (" + ticket.channelName() + "): bei "
+							+ ergaenzt + " Nachricht(en) die Embeds ergänzt.");
 				}
 				// Der Verlauf kommt neueste zuerst; eingetragen wird in der
 				// Reihenfolge, in der geschrieben wurde.
@@ -216,9 +249,34 @@ public class TranscriptRecorder extends ListenerAdapter {
 		if (!event.isFromGuild() || TicketDao.byChannel(event.getChannel().getId()).isEmpty()) {
 			return;
 		}
+		aktualisiere(event.getMessage());
+	}
+
+	/**
+	 * Zieht Text und Embeds einer geaenderten Nachricht nach.
+	 *
+	 * "Bearbeitet" wird sie nur, wenn Discord sie selbst so fuehrt. Ein
+	 * Update-Event kommt naemlich auch, wenn Discord einer Nachricht mit Link
+	 * nachtraeglich die Vorschau anhaengt: bis 20.11.2026 stand deshalb jede
+	 * zweite Nachricht mit Link (108 von 206) als "bearbeitet" im Transcript,
+	 * obwohl niemand sie angefasst hatte.
+	 */
+	void aktualisiere(Message message) {
 		Database.update(
-				"UPDATE ticket_messages SET content = ?, edited_at = CURRENT_TIMESTAMP WHERE message_id = ?",
-				event.getMessage().getContentRaw(), event.getMessageId());
+				"UPDATE ticket_messages SET content = ?, embeds_json = CAST(? AS jsonb), "
+						+ "edited_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE edited_at END "
+						+ "WHERE message_id = ?",
+				message.getContentRaw(), embedsVon(message), message.isEdited(), message.getId());
+	}
+
+	/** Die Embeds als JSON; ein Fehler dabei darf die Nachricht nicht kosten. */
+	private static String embedsVon(Message message) {
+		try {
+			return Einbettungen.alsJson(message.getEmbeds());
+		} catch (final RuntimeException e) {
+			System.err.println("Embeds von Nachricht " + message.getId() + " nicht lesbar: " + e);
+			return null;
+		}
 	}
 
 	@Override

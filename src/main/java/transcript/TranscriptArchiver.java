@@ -35,7 +35,7 @@ public final class TranscriptArchiver {
 
 	/** Eine Zeile des Verlaufs, so wie sie in der Datenbank steht. */
 	private record Row(String messageId, String authorId, String authorName, boolean bot,
-			String content, String sentAt, String editedAt, String deletedAt) {
+			String content, String embedsJson, String sentAt, String editedAt, String deletedAt) {
 	}
 
 	/** Warum archiviert wird — das aendert den Log-Eintrag und die DM. */
@@ -184,7 +184,7 @@ public final class TranscriptArchiver {
 
 	private static List<Row> loadRows(long ticketId) {
 		return Database.query(
-				"SELECT message_id, author_id, author_name, author_bot, content, sent_at, edited_at, deleted_at "
+				"SELECT message_id, author_id, author_name, author_bot, content, embeds_json, sent_at, edited_at, deleted_at "
 						+ "FROM ticket_messages WHERE ticket_id = ? ORDER BY sent_at, id",
 				rs -> new Row(
 						rs.getString("message_id"),
@@ -192,6 +192,7 @@ public final class TranscriptArchiver {
 						rs.getString("author_name"),
 						rs.getBoolean("author_bot"),
 						rs.getString("content"),
+						rs.getString("embeds_json"),
 						String.valueOf(rs.getTimestamp("sent_at")),
 						rs.getTimestamp("edited_at") == null ? null : String.valueOf(rs.getTimestamp("edited_at")),
 						rs.getTimestamp("deleted_at") == null ? null : String.valueOf(rs.getTimestamp("deleted_at"))),
@@ -229,6 +230,10 @@ public final class TranscriptArchiver {
 				m.put("author_name", r.authorName());
 				m.put("bot", r.bot());
 				m.put("content", r.content());
+				final var embeds = Einbettungen.alsKnoten(r.embedsJson());
+				if (embeds != null) {
+					m.set("embeds", embeds);
+				}
 				m.put("sent_at", r.sentAt());
 				if (r.editedAt() != null) {
 					m.put("edited_at", r.editedAt());
