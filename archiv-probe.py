@@ -133,10 +133,17 @@ def main():
     zeiger = sql("SELECT ticket_id, storage_channel_id, storage_message_id, "
                  "(EXTRACT(EPOCH FROM archived_at) * 1000)::bigint AS archiviert_ms FROM transcript_archives")
     db_nachrichten = {}
+    # "schliessnachricht": die leere Knopf-Nachricht des Bots nach dem Schließen.
+    # Dieselbe Ausnahme wie TranscriptArchiver.archivIstAktuell – ihretwegen wird
+    # beim Löschen bewusst nicht neu archiviert, sie fehlt also zu Recht.
     for z in sql("SELECT ticket_id, message_id, COALESCE(content, '') AS content, "
+                 "(author_bot AND COALESCE(content, '') = '' "
+                 " AND (embeds_json IS NULL OR embeds_json->0->>'title' = 'Ticket geschlossen') "
+                 " AND NOT EXISTS (SELECT 1 FROM ticket_attachments a WHERE a.ticket_message_id = m.id)"
+                 ") AS schliessnachricht, "
                  "(EXTRACT(EPOCH FROM sent_at) * 1000)::bigint AS gesendet_ms, "
                  "(EXTRACT(EPOCH FROM edited_at) * 1000)::bigint AS bearbeitet_ms "
-                 "FROM ticket_messages WHERE ticket_id IN (SELECT ticket_id FROM transcript_archives)"):
+                 "FROM ticket_messages m WHERE ticket_id IN (SELECT ticket_id FROM transcript_archives)"):
         db_nachrichten.setdefault(z["ticket_id"], {})[z["message_id"]] = z
     anhaenge = sql("SELECT ticket_id, filename, storage_channel_id, storage_message_id, storage_attach_id "
                    "FROM ticket_attachments")
@@ -194,7 +201,8 @@ def main():
             if mid not in im_archiv:
                 # Nach dem Archiv geschrieben? Dann fehlt sie zu Recht (bis zum Löschen).
                 if m["gesendet_ms"] > z["archiviert_ms"] - 5000:
-                    spaeter += 1
+                    if not m["schliessnachricht"]:
+                        spaeter += 1
                 else:
                     fehlt += 1
                 continue
