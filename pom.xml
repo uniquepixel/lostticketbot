@@ -24,6 +24,13 @@
 				<type>pom</type>
 				<scope>import</scope>
 			</dependency>
+			<!-- protobuf kommt über JDA → tink; 3.25.3 hat CVE-2024-7254 (OSV-Prüfung
+			     25.11.2026, nicht erreichbar, aber gleichgezogen mit den anderen Bots). -->
+			<dependency>
+				<groupId>com.google.protobuf</groupId>
+				<artifactId>protobuf-java</artifactId>
+				<version>3.25.8</version>
+			</dependency>
 		</dependencies>
 	</dependencyManagement>
 	<dependencies>
