@@ -181,4 +181,14 @@ class DiscordLogTest {
 				"Die Einrückung macht einen Stacktrace erst lesbar");
 		assertFalse(b.get(0).endsWith("\n"));
 	}
+
+	@Test
+	@DisplayName("Beim Herunterfahren wird nicht mehr gesendet — sonst ruft jeder Neustart die Wache")
+	void beimHerunterfahrenStumm() {
+		assertTrue(DiscordLog.faehrtHerunter(net.dv8tion.jda.api.JDA.Status.SHUTTING_DOWN));
+		assertTrue(DiscordLog.faehrtHerunter(net.dv8tion.jda.api.JDA.Status.SHUTDOWN));
+		assertFalse(DiscordLog.faehrtHerunter(net.dv8tion.jda.api.JDA.Status.CONNECTED));
+		// Ein Verbindungsabbruch ist kein Stopp: dann wird weiter versucht.
+		assertFalse(DiscordLog.faehrtHerunter(net.dv8tion.jda.api.JDA.Status.ATTEMPTING_TO_RECONNECT));
+	}
 }

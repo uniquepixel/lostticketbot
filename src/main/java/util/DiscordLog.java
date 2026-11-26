@@ -254,6 +254,13 @@ public final class DiscordLog {
 		if (aktuelle == null || block.isBlank()) {
 			return;
 		}
+		if (faehrtHerunter(aktuelle.getStatus())) {
+			// Beim Stoppen nimmt JDA nichts mehr an. Die letzten Zeilen stehen
+			// im Journal; ein Sendeversuch braechte nur eine
+			// RejectedExecutionException, die wie ein Fehler aussieht (und
+			// die Wache nach jedem Ausliefern rufen liess).
+			return;
+		}
 		final TextChannel kanal = aktuelle.getTextChannelById(kanalId);
 		if (kanal == null) {
 			// Nicht sofort aufgeben. Direkt nach einem Verbindungsabbruch ist
@@ -267,9 +274,18 @@ public final class DiscordLog {
 		// Mit Fehlerbehandlung, damit JDA den Fehlschlag NICHT selbst
 		// protokolliert — sonst faende er den Weg zurueck in diese
 		// Warteschlange und das Ganze drehte sich im Kreis.
-		kanal.sendMessage("```\n" + block + "\n```").queue(
-				ok -> fehlerInFolge.set(0),
-				err -> scheitern("Senden fehlgeschlagen: " + err.getMessage()));
+		try {
+			kanal.sendMessage("```\n" + block + "\n```").queue(
+					ok -> fehlerInFolge.set(0),
+					err -> scheitern("Senden fehlgeschlagen: " + err.getMessage()));
+		} catch (final java.util.concurrent.RejectedExecutionException e) {
+			// Der Stopp kam zwischen Pruefung und Senden: dasselbe wie oben.
+		}
+	}
+
+	/** Faehrt JDA gerade herunter (oder ist schon aus)? Dann wird nicht mehr gesendet. */
+	static boolean faehrtHerunter(JDA.Status status) {
+		return status == JDA.Status.SHUTTING_DOWN || status == JDA.Status.SHUTDOWN;
 	}
 
 	/**
